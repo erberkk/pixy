@@ -1,0 +1,618 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* The OS window is a fixed, larger-than-needed size (see tauri.conf.json) so
+   the pill never has to physically resize the native window at runtime —
+   growing/shrinking happens entirely below, via CSS on #mascot itself. */
+body {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  position: relative;
+}
+
+/* Right-click quick menu: round icon buttons that fan out below the pill
+   along a shallow arc, instead of the OS's default rectangular context menu
+   or a plain row. Each item is positioned individually (nth-child) rather
+   than via flex, since a fan-out only makes sense with known fixed
+   positions per item — not a generic layout that grows with more items. */
+#quick-menu {
+  position: absolute;
+  top: 54px;
+  left: 50%;
+  width: 0;
+  height: 0;
+  z-index: 10;
+}
+
+.quick-menu-item {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: #1a1a1a;
+  border: 1px solid #333;
+  color: #ddd;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(0.4);
+  pointer-events: none;
+  transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.15s ease,
+    background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+/* Shallow downward arc: outer items sit a little higher than the center
+   one, like a fan opening from the pill. */
+#quick-menu.visible .quick-menu-item {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+#quick-menu.visible .quick-menu-item:nth-child(1) {
+  transform: translate(calc(-50% - 30px), calc(-50% + 22px)) scale(1);
+  transition-delay: 0.02s;
+}
+
+#quick-menu.visible .quick-menu-item:nth-child(2) {
+  transform: translate(calc(-50% + 30px), calc(-50% + 22px)) scale(1);
+  transition-delay: 0.06s;
+}
+
+.quick-menu-item:hover {
+  background: #2a2a2a;
+  border-color: #e8b04b;
+  color: #e8b04b;
+}
+
+.quick-menu-item svg {
+  width: 16px;
+  height: 16px;
+}
+
+#mascot {
+  margin-top: 8px;
+  width: 170px;
+  height: 42px;
+  background: #000;
+  border-radius: 21px;
+  border: 2px solid transparent;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  overflow: hidden;
+  image-rendering: pixelated;
+  transition: width 0.3s ease, height 0.3s ease, border-radius 0.3s ease,
+    border-color 0.25s ease, filter 0.15s ease;
+  padding: 6px 14px;
+}
+
+/* Dynamic-Island-style subtle hover feedback while idle. Uses filter/border,
+   not box-shadow — a shadow's blur gets hard-clipped at the window's exact
+   bounds (no margin exists for it to fade into), which reads as a visible
+   rectangle rather than a soft glow. */
+.state-idle #mascot:hover {
+  filter: brightness(1.35);
+}
+
+.face {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.eyes {
+  display: flex;
+  gap: 12px;
+}
+
+.eye {
+  width: 9px;
+  height: 9px;
+  background: #fff;
+  transition: all 0.15s ease;
+}
+
+.mouth {
+  width: 26px;
+  height: 3px;
+  background: #fff;
+  transition: all 0.2s ease;
+}
+
+/* idle: calm pill, occasional slow blink */
+.state-idle #mascot {
+  animation: blink 4.5s infinite;
+}
+
+@keyframes blink {
+  0%,
+  92%,
+  100% {
+    /* eyes open */
+  }
+  95% {
+    filter: brightness(0.4);
+  }
+}
+
+/* waiting: Claude needs your attention — expanded panel with a fixed notice,
+   never the raw tool/command content.
+   NOTE: these class names use underscores (state-waiting_permission) to
+   exactly match the JS state strings ("waiting_permission") — a hyphenated
+   version here silently never matches, which was the actual root cause of
+   a very long-running "nothing visually updates" bug. */
+.state-waiting_permission #mascot,
+.state-waiting_input #mascot {
+  width: 280px;
+  height: 90px;
+  border-radius: 26px;
+}
+
+.state-waiting_permission .face,
+.state-waiting_input .face {
+  display: none;
+}
+
+.notice {
+  display: none;
+}
+
+.state-waiting_permission .notice,
+.state-waiting_input .notice {
+  display: block;
+  color: #fff;
+  font-family: -apple-system, "Segoe UI", sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  text-align: center;
+}
+
+/* turn done: brief soft flash, then settles back to the idle pill.
+   Brightness-only, not box-shadow — stays contained inside the pill instead
+   of clipping into a rectangle at the window edge. */
+.state-turn_done #mascot {
+  animation: done-flash 0.6s ease-out;
+}
+
+@keyframes done-flash {
+  0% {
+    filter: brightness(2.2);
+  }
+  100% {
+    filter: brightness(1);
+  }
+}
+
+/* github-merge: a short "your PR merged" notice, clickable to open the PR.
+   Also reused as-is by showGithubIssueNotice (main.js) for issue
+   assigned/comment/closed/reopened notices — same box treatment, just a
+   different icon/text per event. Same class since it's pushed directly
+   from github.rs/issue_watcher.rs (see showTransientNotice in main.js),
+   not through the mascot-state hook state machine. Slightly taller than a
+   single line needs, to fit the issue notices' extra repo-name line. */
+.state-github_merge #mascot {
+  width: 300px;
+  height: 100px;
+  border-radius: 26px;
+}
+
+.state-github_merge .face {
+  display: none;
+}
+
+.state-github_merge .notice {
+  display: flex;
+  color: #fff;
+  font-family: -apple-system, "Segoe UI", sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  text-align: center;
+  cursor: pointer;
+}
+
+.merge-notice {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 0 14px;
+}
+
+.merge-notice svg {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  color: #a371f7;
+}
+
+/* Issue notices only (see showGithubIssueNotice) — the merge notice's
+   single <span> doesn't use this, it's just for the two-line repo+action
+   text stack. */
+.issue-notice-text {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+}
+
+.issue-notice-repo {
+  font-size: 10px;
+  font-weight: 700;
+  color: #8b949e;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 220px;
+}
+
+.issue-notice-action {
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 220px;
+}
+
+/* github-digest: a longer itemized daily summary — the pill grows to a
+   proper readable card instead of trying to cram a list into a one-line
+   notice. Pinned open: no auto-dismiss timer, only the explicit Close
+   button below the list can leave this state (see main.js's digestLocked
+   guard) — nothing else (hook events, merge notices) can override it while
+   it's showing. */
+.state-github_digest #mascot {
+  width: 520px;
+  height: 460px;
+  border-radius: 22px;
+  padding: 22px 24px;
+  background: #0d0d0d;
+  border: 1px solid #262626;
+}
+
+.state-github_digest .face {
+  display: none;
+}
+
+.state-github_digest .notice {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  gap: 14px;
+  font-family: -apple-system, "Segoe UI", sans-serif;
+  text-align: left;
+  overflow-y: auto;
+  width: 100%;
+  padding-right: 4px;
+}
+
+.state-github_digest .notice::-webkit-scrollbar {
+  width: 7px;
+}
+
+.state-github_digest .notice::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.state-github_digest .notice::-webkit-scrollbar-thumb {
+  background: #3a3a3a;
+  border-radius: 7px;
+}
+
+.digest-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+  padding-bottom: 14px;
+  border-bottom: 1px solid #262626;
+  color: #eee;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.digest-header svg {
+  width: 20px;
+  height: 20px;
+  color: #e8b04b;
+}
+
+.digest-workload {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-self: flex-start;
+  color: #bbb;
+  font-size: 12px;
+  font-weight: 600;
+  background: #1c1c1c;
+  border: 1px solid #2e2e2e;
+  border-radius: 20px;
+  padding: 5px 14px;
+}
+
+.digest-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.digest-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  color: #ddd;
+  font-size: 13.5px;
+  line-height: 1.55;
+  background: #161616;
+  border: 1px solid #232323;
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.digest-dot {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  margin-top: 7px;
+  border-radius: 50%;
+  background: #555;
+}
+
+/* Category colors: red = someone's blocking you (changes requested), amber
+   = a real action item from issue-thread analysis, blue = waiting on a
+   review, green = approved/ready, gray = just old. Carries meaning at a
+   glance instead of every row looking identical. */
+.digest-row--danger {
+  color: #f5a3a3;
+}
+.digest-row--danger .digest-dot {
+  background: #e05c5c;
+  box-shadow: 0 0 0 3px rgba(224, 92, 92, 0.2);
+}
+
+.digest-row--action {
+  color: #f0c674;
+}
+.digest-row--action .digest-dot {
+  background: #e8b04b;
+  box-shadow: 0 0 0 3px rgba(232, 176, 75, 0.2);
+}
+
+.digest-row--info {
+  color: #8fb8e8;
+}
+.digest-row--info .digest-dot {
+  background: #5c8fd6;
+  box-shadow: 0 0 0 3px rgba(92, 143, 214, 0.2);
+}
+
+.digest-row--ok {
+  color: #8fd6a8;
+}
+.digest-row--ok .digest-dot {
+  background: #5cbf7e;
+  box-shadow: 0 0 0 3px rgba(92, 191, 126, 0.2);
+}
+
+.digest-row--stale {
+  color: #999;
+}
+.digest-row--stale .digest-dot {
+  background: #666;
+}
+
+.digest-close-btn {
+  display: none;
+}
+
+.state-github_digest .digest-close-btn {
+  display: block;
+  flex: 0 0 auto;
+  background: #262626;
+  border: 1px solid #444;
+  color: #ddd;
+  border-radius: 8px;
+  padding: 5px 16px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.state-github_digest .digest-close-btn:hover {
+  background: #333;
+  border-color: #e8b04b;
+  color: #e8b04b;
+}
+
+/* agent_permission: the embedded agent terminal (terminal.rs) detected a
+   real interactive permission prompt in its raw output and is waiting for
+   Approve/Deny — clicking writes the matching keystroke(s) straight back
+   into that CLI's stdin. Pinned open the same way as the digest card, but
+   sized to its CONTENT (width/height: fit-content, bounded by min/max)
+   instead of a fixed box — a one-line command shouldn't sit in a mostly
+   empty 700x400 card. */
+.state-agent_permission #mascot {
+  width: fit-content;
+  min-width: 340px;
+  max-width: 620px;
+  height: fit-content;
+  min-height: 140px;
+  /* Taller ceiling than the old single-card version — several stacked
+     .permission-card entries (one per concurrently-running agent CLI
+     waiting on a decision) need more room before the list itself scrolls. */
+  max-height: 560px;
+  border-radius: 20px;
+  padding: 18px 20px;
+  background: #0d0d0d;
+  border: 1px solid #262626;
+  /* fit-content can't be smoothly animated (browsers can't interpolate to
+     an intrinsic-sizing keyword) — the base pill's width/height transition
+     just snaps to it in an extra visible step instead of animating,
+     reading as the card "settling" twice. Disabling the transition here
+     makes it appear in one clean step instead. */
+  transition: border-color 0.25s ease, filter 0.15s ease;
+}
+
+.state-agent_permission .face {
+  display: none;
+}
+
+/* Container for one-or-more .permission-card entries — each concurrently
+   pending agent CLI (Claude in one terminal slot, Antigravity in another,
+   etc.) gets its own card stacked vertically here rather than the UI
+   showing/queuing them one at a time. Scrolls internally if the stack
+   outgrows #mascot's max-height instead of growing the window forever. */
+.state-agent_permission .notice {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  gap: 14px;
+  overflow-y: auto;
+  font-family: -apple-system, "Segoe UI", sans-serif;
+  text-align: left;
+  width: 100%;
+}
+
+.state-agent_permission .notice::-webkit-scrollbar {
+  width: 7px;
+}
+.state-agent_permission .notice::-webkit-scrollbar-track {
+  background: transparent;
+}
+.state-agent_permission .notice::-webkit-scrollbar-thumb {
+  background: #3a3a3a;
+  border-radius: 7px;
+}
+
+.permission-card {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  gap: 12px;
+}
+
+.permission-card + .permission-card {
+  padding-top: 14px;
+  border-top: 1px solid #262626;
+}
+
+.permission-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #eee;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.permission-header::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #e8b04b;
+  box-shadow: 0 0 0 3px rgba(232, 176, 75, 0.2);
+}
+
+.permission-preview {
+  flex: 0 0 auto;
+  max-height: 160px;
+  overflow-y: auto;
+  background: #161616;
+  border: 1px solid #232323;
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.permission-preview::-webkit-scrollbar {
+  width: 7px;
+}
+.permission-preview::-webkit-scrollbar-track {
+  background: transparent;
+}
+.permission-preview::-webkit-scrollbar-thumb {
+  background: #3a3a3a;
+  border-radius: 7px;
+}
+
+/* First line only — the tool/action header (e.g. "Bash command", "Write",
+   "File access") gets its own badge-like styling so it reads as a label,
+   not just another line of body text. */
+.permission-tool {
+  color: #e8b04b;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.permission-line {
+  color: #ddd;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 12.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.permission-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.permission-btn {
+  background: #262626;
+  border: 1px solid #444;
+  color: #ddd;
+  border-radius: 8px;
+  padding: 6px 18px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.permission-btn--approve:hover {
+  background: #333;
+  border-color: #5cbf7e;
+  color: #5cbf7e;
+}
+
+.permission-btn--deny:hover {
+  background: #333;
+  border-color: #e05c5c;
+  color: #e05c5c;
+}

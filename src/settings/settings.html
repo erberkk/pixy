@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="settings.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Settings</title>
+    <script type="module" src="./settings.js" defer></script>
+  </head>
+
+  <body>
+    <div id="titlebar" data-tauri-drag-region>
+      <span id="titlebar-title" data-tauri-drag-region>Settings</span>
+      <button class="titlebar-btn" id="titlebar-close" title="Close">
+        <svg viewBox="0 0 10 10"><path d="M0 0l10 10M10 0L0 10" stroke="currentColor" stroke-width="1"/></svg>
+      </button>
+    </div>
+
+    <div class="hub">
+      <nav class="hub-sidebar">
+        <button class="hub-nav-item active" data-section="llm">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09a1.65 1.65 0 00-1-1.51 1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09a1.65 1.65 0 001.51-1 1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+          <span>LLM</span>
+        </button>
+        <button class="hub-nav-item" data-section="github">
+          <svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.57.1.79-.25.79-.55 0-.27-.01-1.16-.02-2.11-3.2.7-3.88-1.36-3.88-1.36-.52-1.33-1.28-1.68-1.28-1.68-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.18 1.76 1.18 1.03 1.76 2.7 1.25 3.36.96.1-.75.4-1.25.73-1.54-2.55-.29-5.23-1.28-5.23-5.68 0-1.25.45-2.28 1.18-3.08-.12-.29-.51-1.46.11-3.04 0 0 .96-.31 3.15 1.18a10.9 10.9 0 015.74 0c2.19-1.49 3.15-1.18 3.15-1.18.62 1.58.23 2.75.11 3.04.74.8 1.18 1.83 1.18 3.08 0 4.41-2.69 5.38-5.25 5.67.42.36.78 1.07.78 2.16 0 1.56-.01 2.82-.01 3.2 0 .31.21.66.8.55A10.99 10.99 0 0023.5 12C23.5 5.65 18.35.5 12 .5z"/></svg>
+          <span>GitHub</span>
+        </button>
+      </nav>
+
+      <div class="hub-content">
+        <section class="hub-section active" id="section-llm">
+          <p class="hint">
+            Connect to any OpenAI-compatible local runtime — Ollama, LM Studio,
+            llama.cpp server, and similar.
+          </p>
+
+          <label class="field">
+            <span>Base URL</span>
+            <input id="baseUrl" placeholder="http://localhost:11434/v1" />
+          </label>
+
+          <label class="field">
+            <span>Model name</span>
+            <input id="model" placeholder="qwen3.5:9b" />
+          </label>
+
+          <label class="field">
+            <span>API Key <em>(optional)</em></span>
+            <input id="apiKey" type="password" placeholder="—" />
+          </label>
+
+          <div class="field-row">
+            <label class="field" style="flex: 1;">
+              <span>Max tokens</span>
+              <input id="maxTokens" type="number" min="50" step="50" placeholder="600" />
+            </label>
+            <label class="switch-row" style="flex: 1;">
+              <span>Allow model thinking/reasoning</span>
+              <span class="switch">
+                <input type="checkbox" id="think" />
+                <span class="switch-track"><span class="switch-thumb"></span></span>
+              </span>
+            </label>
+          </div>
+
+          <label class="switch-row">
+            <span>Auto-start this server when the widget launches</span>
+            <span class="switch">
+              <input type="checkbox" id="autostart" />
+              <span class="switch-track"><span class="switch-thumb"></span></span>
+            </span>
+          </label>
+
+          <label class="field" id="startCommandField">
+            <span>Start command</span>
+            <input id="startCommand" placeholder="ollama serve" />
+          </label>
+
+          <div class="status" id="llmStatus"></div>
+
+          <div class="actions">
+            <button class="btn" id="llmTestBtn">Test connection</button>
+            <button class="btn primary" id="llmSaveBtn">Save</button>
+          </div>
+        </section>
+
+        <section class="hub-section" id="section-github">
+          <p class="hint">
+            Needs a fine-grained (or classic) personal access token — read
+            access to Issues, Pull requests, and Metadata is enough.
+          </p>
+
+          <label class="field">
+            <span>Personal Access Token</span>
+            <input id="token" type="password" placeholder="github_pat_…" />
+          </label>
+
+          <div class="status" id="githubStatus"></div>
+
+          <div class="actions">
+            <button class="btn" id="githubTestBtn">Test connection</button>
+            <button class="btn primary" id="githubSaveBtn">Save</button>
+          </div>
+
+          <div class="panel-divider"></div>
+
+          <div class="report-head">
+            <span class="report-updated" id="reportUpdated"></span>
+            <button class="btn small" id="refreshBtn">Refresh</button>
+          </div>
+
+          <div class="report-error" id="reportError"></div>
+
+          <div class="report-section">
+            <h4>Assigned to me</h4>
+            <div class="report-list" id="issuesList"></div>
+          </div>
+
+          <div class="report-section">
+            <h4>My pull requests</h4>
+            <div class="report-list" id="prsList"></div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </body>
+</html>

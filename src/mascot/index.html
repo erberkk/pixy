@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="spotify.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mascot</title>
+    <script type="module" src="./main.js" defer></script>
+    <script type="module" src="./spotify.js" defer></script>
+  </head>
+
+  <body class="state-idle">
+    <div id="mascot" data-tauri-drag-region>
+      <div class="face">
+        <div class="eyes">
+          <div class="eye" id="eye-left"></div>
+          <div class="eye" id="eye-right"></div>
+        </div>
+        <div class="mouth" id="mouth"></div>
+      </div>
+
+      <div class="notice" id="notice"></div>
+      <button class="digest-close-btn" id="digest-close-btn">Close</button>
+
+      <div class="spotify-panel" id="spotify-panel">
+        <div class="spotify-column">
+          <img class="spotify-art" id="spotify-art" alt="" />
+          <div class="spotify-title" id="spotify-title"></div>
+          <div class="spotify-artist" id="spotify-artist"></div>
+          <div class="spotify-controls">
+            <button class="spotify-btn" id="spotify-prev" title="Previous">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
+            </button>
+            <button class="spotify-btn spotify-btn--main" id="spotify-play-pause" title="Play/Pause">
+              <svg class="icon-play" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+              <svg class="icon-pause" viewBox="0 0 24 24" fill="currentColor" style="display: none"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>
+            </button>
+            <button class="spotify-btn" id="spotify-next" title="Next">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M16 6h2v12h-2zM6 6l8.5 6L6 18z"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="panel-divider"></div>
+
+        <!-- General system audio panel (NOT scoped to Spotify's session —
+             Spotify's own volume now lives only in the per-app list below,
+             it's one of the rows, not a separate control on the left). Mic
+             and speaker are both plain instant mute/unmute buttons, side by
+             side top-right; the list below (Master + every app, live-synced
+             with Windows' own Volume Mixer) is where actual levels live. -->
+        <div class="audio-column">
+          <div class="audio-toolbar">
+            <button class="toggle-btn" id="system-speaker-toggle" title="Mute/unmute speaker">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 010 7"/>
+              </svg>
+            </button>
+            <button class="toggle-btn" id="system-mic-toggle" title="Mute/unmute microphone">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0014 0"/><path d="M12 17v4"/><path d="M8 21h8"/>
+              </svg>
+            </button>
+          </div>
+          <div class="audio-session-list" id="audio-session-list"></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="quick-menu">
+      <button class="quick-menu-item" id="quick-menu-notepad" title="Notepad">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 3v5h5M6 3h8l6 6v12H6z"/></svg>
+      </button>
+      <button class="quick-menu-item" id="quick-menu-settings" title="Settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09a1.65 1.65 0 00-1-1.51 1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09a1.65 1.65 0 001.51-1 1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+      </button>
+    </div>
+  </body>
+</html>

@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="../vendor/xterm/xterm.css" />
+    <link rel="stylesheet" href="terminal.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Agent Terminal</title>
+    <script src="../vendor/xterm/xterm.js"></script>
+    <script src="../vendor/xterm/addon-fit.js"></script>
+    <script type="module" src="./terminal.js" defer></script>
+  </head>
+
+  <body>
+    <div id="titlebar" data-tauri-drag-region>
+      <span id="titlebar-title" data-tauri-drag-region>Agent Terminal</span>
+      <div id="titlebar-controls">
+        <button class="titlebar-btn" id="titlebar-minimize" title="Minimize">
+          <svg viewBox="0 0 10 10"><path d="M0 5h10" stroke="currentColor" stroke-width="1"/></svg>
+        </button>
+        <button class="titlebar-btn" id="titlebar-maximize" title="Maximize">
+          <svg viewBox="0 0 10 10"><rect x="0.5" y="0.5" width="9" height="9" fill="none" stroke="currentColor" stroke-width="1"/></svg>
+        </button>
+        <button class="titlebar-btn" id="titlebar-close" title="Close">
+          <svg viewBox="0 0 10 10"><path d="M0 0l10 10M10 0L0 10" stroke="currentColor" stroke-width="1"/></svg>
+        </button>
+      </div>
+    </div>
+    <div id="term"></div>
+  </body>
+</html>
