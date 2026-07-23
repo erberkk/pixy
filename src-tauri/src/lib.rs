@@ -28,12 +28,12 @@ use media::{
 use notes::{choose_notes_dir, delete_note, get_notes_dir, list_notes, open_external_file, open_path, save_note};
 use server::start_event_server;
 use terminal::{
-    approve_permission, deny_permission, report_terminal_text, resize_pty, start_terminal_session,
-    write_to_pty,
+    approve_permission, deny_permission, list_agent_sessions, report_terminal_text, resize_pty,
+    start_terminal_session, write_to_pty,
 };
 use windows::{
-    hide_notepad, hide_settings, hide_terminal, open_notepad, open_settings, open_terminal,
-    position_top_center,
+    focus_terminal_session, hide_mascot, hide_notepad, hide_settings, hide_terminal, open_notepad,
+    open_settings, open_terminal, position_top_center,
 };
 
 // Hides (not destroys) a window on close — destroying it would require
@@ -78,12 +78,15 @@ pub fn run() {
             set_click_through_paused,
             open_terminal,
             hide_terminal,
+            hide_mascot,
             start_terminal_session,
             write_to_pty,
             report_terminal_text,
             resize_pty,
             approve_permission,
             deny_permission,
+            list_agent_sessions,
+            focus_terminal_session,
             spotify_get_state,
             spotify_play_pause,
             spotify_next,

@@ -408,11 +408,20 @@ function openTerminal() {
 }
 
 const AGENT_LABELS = {
-  claude: "Claude Code",
-  codex: "Codex CLI",
+  claude: "Claude",
+  codex: "Codex",
   antigravity: "Antigravity",
+  cursor: "Cursor",
   cli: "Agent CLI",
 };
+
+// terminalN -> "Terminal N" (plain "terminal" is slot 1) — used by both the
+// permission card header (implicitly, via session_id) and the "show all
+// agents" list rows.
+function terminalDisplayName(sessionId) {
+  const match = /(\d+)$/.exec(sessionId || "");
+  return match ? `Terminal ${match[1]}` : "Terminal 1";
+}
 
 // Pinned open like the digest card (see noticeLocked) — the embedded agent
 // terminals (terminal.rs) can each detect a permission prompt independently,
@@ -423,11 +432,123 @@ const AGENT_LABELS = {
 // at the same time, stacked vertically instead of shown one-at-a-time.
 let pendingPermissions = [];
 
-// preview[0] is rendered as a colored "tool" badge (e.g. "Bash command"),
-// the rest as monospace body lines — real visual hierarchy instead of one
-// flat stack of text. Each card sizes its preview box independently (see
-// .permission-preview's max-height) so one verbose request doesn't crowd
-// out the others in the stack.
+// Toggled by the "Show all agents" button — independent of pendingPermissions
+// so the expanded list survives across re-renders (e.g. a new prompt arriving
+// from another terminal) until the user explicitly collapses it again.
+let allSessionsVisible = false;
+
+// Claude/Antigravity's Edit-tool previews are already unified-diff-shaped
+// text ("<path>  +N -M" header line, then "<lineno> <+/-> <code>" rows) —
+// rendering that as flat gray text (or just tinting whole lines) reads as an
+// undifferentiated wall of text. These two parsers pull out the structure so
+// it can be rendered like an actual code editor's diff view instead: a small
+// file-path header with +/- stat counts, then aligned line-number/marker/code
+// columns with a full-row tint per line — same idea as any real diff viewer.
+
+// "src/components/App.tsx  +2 -2" or a full Windows path with the same
+// trailing stat suffix — two+ spaces before the stats is the signal that
+// separates the path from the counts (paths can't contain a run of spaces
+// like that in practice).
+const DIFF_HEADER_RE = /^(.+?)\s{2,}([+-]\d+)(?:\s+([+-]\d+))?$/;
+
+// "12 + import foo" / "- removed line" (line number optional — not every
+// CLI's diff rows are numbered). The marker must be the very first
+// non-space character; "++"/"--" prefixes (diff hunk headers, decrement
+// operators) are excluded so those aren't misread as a real diff row.
+const DIFF_ROW_RE = /^(\d+)?\s*([+-])(?!\2)\s?(.*)$/;
+
+function parseDiffHeader(line) {
+  const m = DIFF_HEADER_RE.exec(line.trim());
+  if (!m) return null;
+  return { path: m[1], stats: [m[2], m[3]].filter(Boolean) };
+}
+
+function parseDiffRow(line) {
+  const m = DIFF_ROW_RE.exec(line);
+  if (!m) return null;
+  return { lineno: m[1] || "", marker: m[2], content: m[3] };
+}
+
+function looksLikeDiffContent(line) {
+  return parseDiffHeader(line) !== null || parseDiffRow(line) !== null;
+}
+
+// Only a bare, short tool name ("Bash command", "Edit", "File access",
+// "Requested Permission: ...") is worth the uppercased badge treatment.
+// A line like "Write: C:/Users/.../README.md" is a real action detail with a
+// path in it — uppercasing that reads terribly, so it's rendered as a normal
+// monospace line instead.
+const TOOL_BADGE_WORDS = new Set([
+  "bash command", "write", "edit", "multiedit", "read", "webfetch", "file access", "task", "search",
+]);
+function isToolBadgeLine(line) {
+  const l = line.trim().toLowerCase();
+  return TOOL_BADGE_WORDS.has(l) || l.startsWith("requested permission");
+}
+
+function buildDiffHeaderRow(parsed) {
+  const row = document.createElement("div");
+  row.className = "diff-header";
+  const path = document.createElement("span");
+  path.className = "diff-header-path";
+  path.textContent = parsed.path;
+  row.appendChild(path);
+  const stats = document.createElement("span");
+  stats.className = "diff-header-stats";
+  for (const stat of parsed.stats) {
+    const s = document.createElement("span");
+    s.className = stat.startsWith("+") ? "diff-header-stat-add" : "diff-header-stat-remove";
+    s.textContent = stat;
+    stats.appendChild(s);
+  }
+  row.appendChild(stats);
+  return row;
+}
+
+function buildDiffCodeRow(parsed) {
+  const row = document.createElement("div");
+  row.className = `diff-row ${parsed.marker === "+" ? "diff-row--add" : "diff-row--remove"}`;
+  const lineno = document.createElement("span");
+  lineno.className = "diff-lineno";
+  lineno.textContent = parsed.lineno;
+  row.appendChild(lineno);
+  const marker = document.createElement("span");
+  marker.className = "diff-marker";
+  marker.textContent = parsed.marker;
+  row.appendChild(marker);
+  const code = document.createElement("span");
+  code.className = "diff-code";
+  code.textContent = parsed.content;
+  row.appendChild(code);
+  return row;
+}
+
+// A wrapped continuation of the diff row above it: the terminal hard-wraps a
+// long changed line across several screen rows, and only the first carries
+// the "12 +" line-number/marker prefix — the rest arrive as plain lines. This
+// renders them with the same add/remove tint and column alignment (blank
+// line-number + marker gutter) so a wrapped diff line reads as one continuous
+// change instead of a tinted first line followed by untinted orphans.
+function buildDiffContinuationRow(marker, content) {
+  const row = document.createElement("div");
+  row.className = `diff-row ${marker === "+" ? "diff-row--add" : "diff-row--remove"}`;
+  const lineno = document.createElement("span");
+  lineno.className = "diff-lineno";
+  row.appendChild(lineno);
+  const markerCol = document.createElement("span");
+  markerCol.className = "diff-marker";
+  row.appendChild(markerCol);
+  const code = document.createElement("span");
+  code.className = "diff-code";
+  code.textContent = content;
+  row.appendChild(code);
+  return row;
+}
+
+// preview[0] is rendered as a colored "tool" badge (e.g. "Bash command")
+// UNLESS it's already diff content itself (some captures start straight into
+// the diff with no separate tool-name line) — real visual hierarchy instead
+// of one flat stack of gray text.
 function renderPermissionList() {
   const notice = document.getElementById("notice");
   notice.innerHTML = "";
@@ -438,20 +559,59 @@ function renderPermissionList() {
 
     const header = document.createElement("div");
     header.className = "permission-header";
-    header.textContent = `${AGENT_LABELS[req.agent] || req.agent} needs approval`;
+
+    const badge = document.createElement("span");
+    badge.className = `agent-badge agent-badge--${req.agent || "cli"}`;
+    badge.textContent = AGENT_LABELS[req.agent] || req.agent;
+    header.appendChild(badge);
+
+    const source = document.createElement("span");
+    source.className = "permission-header-source";
+    source.textContent = terminalDisplayName(req.session_id);
+    header.appendChild(source);
+
+    const text = document.createElement("span");
+    text.className = "permission-header-text";
+    text.textContent = "needs approval";
+    header.appendChild(text);
     card.appendChild(header);
 
     const lines = (Array.isArray(req.preview) ? req.preview : [req.preview]).filter(Boolean);
     const box = document.createElement("div");
     box.className = "permission-preview";
 
-    if (lines.length > 0) {
+    let bodyLines = lines;
+    if (lines.length > 0 && isToolBadgeLine(lines[0])) {
       const tool = document.createElement("div");
       tool.className = "permission-tool";
       tool.textContent = lines[0];
       box.appendChild(tool);
+      bodyLines = lines.slice(1);
     }
-    for (const line of lines.slice(1)) {
+
+    // Tracks whether we're mid-diff-row so a plain (marker-less) line can be
+    // recognized as a wrapped continuation of the change above it and tinted
+    // to match. Reset by a header or a fresh diff row; a genuine non-diff line
+    // only appears after the diff block ends (blocks are divider-bounded, so
+    // in practice that's end-of-preview), keeping false continuations rare.
+    let activeDiffMarker = null;
+    for (const line of bodyLines) {
+      const header = parseDiffHeader(line);
+      if (header) {
+        box.appendChild(buildDiffHeaderRow(header));
+        activeDiffMarker = null;
+        continue;
+      }
+      const diffRow = parseDiffRow(line);
+      if (diffRow) {
+        box.appendChild(buildDiffCodeRow(diffRow));
+        activeDiffMarker = diffRow.marker;
+        continue;
+      }
+      if (activeDiffMarker) {
+        box.appendChild(buildDiffContinuationRow(activeDiffMarker, line));
+        continue;
+      }
       const row = document.createElement("div");
       row.className = "permission-line";
       row.textContent = line;
@@ -475,6 +635,96 @@ function renderPermissionList() {
 
     notice.appendChild(card);
   }
+
+  appendAgentSessionsSection(notice);
+}
+
+// "Show all agents" — expands into a list of EVERY pooled terminal that's
+// been opened this run (not just ones with a pending decision), each row
+// showing its detected agent CLI + last visible activity line, click to
+// focus that terminal window. Fetched fresh from the backend each time it's
+// expanded rather than kept in sync live — this is a glanceable summary, not
+// a real-time dashboard.
+function appendAgentSessionsSection(notice) {
+  const toggleBtn = document.createElement("button");
+  toggleBtn.className = "show-all-agents-btn";
+  toggleBtn.textContent = allSessionsVisible ? "Hide all agents" : "Show all agents";
+  toggleBtn.addEventListener("click", () => {
+    allSessionsVisible = !allSessionsVisible;
+    renderPermissionList();
+    reportHotRectSoon();
+  });
+  notice.appendChild(toggleBtn);
+
+  if (!allSessionsVisible) return;
+
+  const placeholder = document.createElement("div");
+  placeholder.className = "agent-sessions-list";
+  const loading = document.createElement("div");
+  loading.className = "agent-session-empty";
+  loading.textContent = "Loading…";
+  placeholder.appendChild(loading);
+  notice.appendChild(placeholder);
+
+  window.__TAURI__.core
+    .invoke("list_agent_sessions")
+    .then((sessions) => {
+      if (!allSessionsVisible || !placeholder.isConnected) return; // collapsed/re-rendered before this resolved
+      placeholder.replaceWith(buildAgentSessionsList(sessions));
+      reportHotRectSoon();
+    })
+    .catch(() => {
+      if (!allSessionsVisible || !placeholder.isConnected) return;
+      loading.textContent = "Couldn't load agent sessions";
+    });
+}
+
+function buildAgentSessionsList(sessions) {
+  const list = document.createElement("div");
+  list.className = "agent-sessions-list";
+
+  if (sessions.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "agent-session-empty";
+    empty.textContent = "No agent terminals opened yet";
+    list.appendChild(empty);
+    return list;
+  }
+
+  for (const s of sessions) {
+    const row = document.createElement("div");
+    row.className = "agent-session-row";
+    row.addEventListener("click", () => {
+      window.__TAURI__.core.invoke("focus_terminal_session", { label: s.session_id });
+    });
+
+    const badge = document.createElement("span");
+    badge.className = `agent-badge agent-badge--${s.agent || "idle"}`;
+    badge.textContent = s.agent ? AGENT_LABELS[s.agent] || s.agent : "Idle";
+    row.appendChild(badge);
+
+    const info = document.createElement("div");
+    info.className = "agent-session-info";
+    const label = document.createElement("span");
+    label.className = "agent-session-label";
+    label.textContent = terminalDisplayName(s.session_id);
+    info.appendChild(label);
+    const activity = document.createElement("span");
+    activity.className = "agent-session-activity";
+    activity.textContent = s.activity || "No activity yet";
+    info.appendChild(activity);
+    row.appendChild(info);
+
+    if (s.has_pending) {
+      const dot = document.createElement("span");
+      dot.className = "agent-session-pending-dot";
+      dot.title = "Waiting for your approval";
+      row.appendChild(dot);
+    }
+
+    list.appendChild(row);
+  }
+  return list;
 }
 
 function showAgentPermissionNotice({ session_id, agent, preview }) {
@@ -506,6 +756,7 @@ function resolveAgentPermission(sessionId, approve) {
       pendingPermissions = pendingPermissions.filter((p) => p.session_id !== sessionId);
       if (pendingPermissions.length === 0) {
         noticeLocked = false;
+        allSessionsVisible = false;
         document.body.className = "state-idle";
       } else {
         renderPermissionList();
@@ -569,6 +820,13 @@ window.addEventListener("DOMContentLoaded", () => {
 
   document.getElementById("quick-menu-settings").addEventListener("click", () => {
     openSettings();
+    hideQuickMenu();
+  });
+
+  // System-tray-style minimize, not app.exit() — background watchers (GitHub
+  // polling, terminal sessions) keep running; bring it back via the tray icon.
+  document.getElementById("quick-menu-hide").addEventListener("click", () => {
+    window.__TAURI__.core.invoke("hide_mascot");
     hideQuickMenu();
   });
 

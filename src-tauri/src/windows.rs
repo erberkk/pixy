@@ -33,6 +33,16 @@ fn hide_window(app: &tauri::AppHandle, label: &str) {
     }
 }
 
+// Hides the mascot window itself (system-tray-style minimize, same as the
+// tray menu's "Hide mascot" item) — NOT app.exit(), so background watchers
+// (github merge/issue polling, terminal sessions, etc.) keep running and the
+// window can be brought back via the tray icon. For "I don't want to see
+// this while gaming/watching something" without actually quitting.
+#[tauri::command]
+pub fn hide_mascot(app: tauri::AppHandle) {
+    hide_window(&app, "mascot");
+}
+
 #[tauri::command]
 pub fn open_settings(app: tauri::AppHandle) {
     show_window(&app, "settings");
@@ -77,6 +87,17 @@ pub fn open_terminal(app: tauri::AppHandle) {
     // front rather than silently doing nothing.
     if let Some(window) = app.get_webview_window(TERMINAL_POOL[TERMINAL_POOL.len() - 1]) {
         let _ = window.set_focus();
+    }
+}
+
+// Invoked from the mascot's "show all agents" list — brings a specific
+// pooled terminal window (by label) to the front, e.g. clicking a row for a
+// session that isn't currently blocked on a permission decision.
+#[tauri::command]
+pub fn focus_terminal_session(app: tauri::AppHandle, label: String) {
+    show_window(&app, &label);
+    if let Some(window) = app.get_webview_window(&label) {
+        let _ = window.unminimize();
     }
 }
 

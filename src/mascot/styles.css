@@ -67,19 +67,32 @@ body {
 }
 
 #quick-menu.visible .quick-menu-item:nth-child(1) {
-  transform: translate(calc(-50% - 30px), calc(-50% + 22px)) scale(1);
+  transform: translate(calc(-50% - 52px), calc(-50% + 18px)) scale(1);
   transition-delay: 0.02s;
 }
 
 #quick-menu.visible .quick-menu-item:nth-child(2) {
-  transform: translate(calc(-50% + 30px), calc(-50% + 22px)) scale(1);
+  transform: translate(-50%, calc(-50% + 30px)) scale(1);
   transition-delay: 0.06s;
+}
+
+#quick-menu.visible .quick-menu-item:nth-child(3) {
+  transform: translate(calc(-50% + 52px), calc(-50% + 18px)) scale(1);
+  transition-delay: 0.1s;
 }
 
 .quick-menu-item:hover {
   background: #2a2a2a;
   border-color: #e8b04b;
   color: #e8b04b;
+}
+
+/* The "hide to tray" button reads as a destructive/dismissive action, unlike
+   Notepad/Settings — amber hover would be misleading here. */
+.quick-menu-item--close:hover {
+  background: #2a2a2a;
+  border-color: #e05c5c;
+  color: #e05c5c;
 }
 
 .quick-menu-item svg {
@@ -465,7 +478,7 @@ body {
   /* Taller ceiling than the old single-card version — several stacked
      .permission-card entries (one per concurrently-running agent CLI
      waiting on a decision) need more room before the list itself scrolls. */
-  max-height: 560px;
+  max-height: 620px;
   border-radius: 20px;
   padding: 18px 20px;
   background: #0d0d0d;
@@ -526,26 +539,72 @@ body {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   color: #eee;
-  font-size: 15px;
-  font-weight: 700;
+  font-size: 13px;
+  font-weight: 600;
   letter-spacing: 0.01em;
 }
 
-.permission-header::before {
-  content: "";
+.permission-header-source {
+  color: #888;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.permission-header-text {
+  color: #aaa;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* One colored pill per agent CLI — same idea as the reference screenshot's
+   top-right model/tool badges, gives each concurrently-running CLI its own
+   visual identity at a glance instead of everything reading the same gray. */
+.agent-badge {
   flex: 0 0 auto;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #e8b04b;
-  box-shadow: 0 0 0 3px rgba(232, 176, 75, 0.2);
+  padding: 3px 9px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  border: 1px solid transparent;
+}
+
+.agent-badge--claude {
+  background: rgba(217, 119, 87, 0.16);
+  border-color: rgba(217, 119, 87, 0.4);
+  color: #e29073;
+}
+
+.agent-badge--codex {
+  background: rgba(16, 163, 127, 0.16);
+  border-color: rgba(16, 163, 127, 0.4);
+  color: #3ecfa5;
+}
+
+.agent-badge--antigravity {
+  background: rgba(139, 92, 246, 0.16);
+  border-color: rgba(139, 92, 246, 0.4);
+  color: #a78bfa;
+}
+
+.agent-badge--cursor {
+  background: rgba(96, 165, 250, 0.16);
+  border-color: rgba(96, 165, 250, 0.4);
+  color: #7dabf8;
+}
+
+.agent-badge--cli,
+.agent-badge--idle {
+  background: rgba(148, 163, 184, 0.14);
+  border-color: rgba(148, 163, 184, 0.35);
+  color: #9aa4b2;
 }
 
 .permission-preview {
   flex: 0 0 auto;
-  max-height: 160px;
+  max-height: 260px;
   overflow-y: auto;
   background: #161616;
   border: 1px solid #232323;
@@ -585,13 +644,207 @@ body {
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
+  padding: 0 4px;
+  border-radius: 3px;
+}
+
+/* Edit/Write-tool previews from Claude/Antigravity are already unified-diff
+   text — coloring +/- lines like a real diff (instead of flat gray) makes
+   the actual code change legible at a glance, matching how every code
+   review tool already renders this. */
+
+/* Small file-path + stat-count row above a diff block — same idea as a real
+   diff viewer's file header, separating "which file" from the actual
+   line-by-line change content below it. */
+.diff-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 11.5px;
+  color: #8b949e;
+  padding: 0 4px 6px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid #232323;
+}
+
+.diff-header-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diff-header-stats {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 6px;
+  font-weight: 700;
+}
+
+.diff-header-stat-add {
+  color: #3fb950;
+}
+
+.diff-header-stat-remove {
+  color: #e05c5c;
+}
+
+/* One row per changed line — line number / +- marker / code laid out in
+   fixed columns (like any real code editor's diff gutter) with a full-row
+   tint per marker, instead of a flat stack of colored text. */
+.diff-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 12.5px;
+  line-height: 1.5;
+  padding: 0 4px;
+  border-radius: 3px;
+}
+
+.diff-row--add {
+  background: rgba(63, 185, 80, 0.12);
+}
+
+.diff-row--remove {
+  background: rgba(224, 92, 92, 0.12);
+}
+
+.diff-lineno {
+  flex: 0 0 24px;
+  text-align: right;
+  color: #666;
+  user-select: none;
+}
+
+.diff-marker {
+  flex: 0 0 10px;
+  font-weight: 700;
+}
+
+.diff-row--add .diff-marker {
+  color: #3fb950;
+}
+
+.diff-row--remove .diff-marker {
+  color: #e05c5c;
+}
+
+.diff-code {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #ddd;
 }
 
 .permission-actions {
   display: flex;
   flex: 0 0 auto;
   gap: 10px;
-  justify-content: flex-end;
+  justify-content: center;
+}
+
+/* "Show all agents" — collapsed by default, sits below whatever permission
+   card(s) are showing so it never competes with the actual decision the user
+   needs to make right now. */
+.show-all-agents-btn {
+  flex: 0 0 auto;
+  align-self: center;
+  margin-top: 2px;
+  background: transparent;
+  border: 1px solid #2a2a2a;
+  color: #888;
+  border-radius: 8px;
+  padding: 5px 14px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+}
+
+.show-all-agents-btn:hover {
+  border-color: #444;
+  color: #ccc;
+}
+
+.agent-sessions-list {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: #131313;
+  border: 1px solid #232323;
+  border-radius: 10px;
+  padding: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.agent-sessions-list::-webkit-scrollbar {
+  width: 7px;
+}
+.agent-sessions-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+.agent-sessions-list::-webkit-scrollbar-thumb {
+  background: #3a3a3a;
+  border-radius: 7px;
+}
+
+.agent-session-empty {
+  color: #666;
+  font-size: 12px;
+  text-align: center;
+  padding: 6px 0;
+}
+
+.agent-session-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.agent-session-row:hover {
+  background: #1c1c1c;
+}
+
+.agent-session-info {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.agent-session-label {
+  color: #ddd;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.agent-session-activity {
+  color: #888;
+  font-size: 11.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: Consolas, "Courier New", monospace;
+}
+
+.agent-session-pending-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #e8b04b;
+  box-shadow: 0 0 0 3px rgba(232, 176, 75, 0.2);
 }
 
 .permission-btn {

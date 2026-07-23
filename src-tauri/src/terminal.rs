@@ -19,6 +19,18 @@ struct PtySession {
     writer: Box<dyn Write + Send>,
     child: Box<dyn Child + Send + Sync>,
     pending: Option<PendingPrompt>,
+    // Last agent CLI identified in this session (set once a prompt is first
+    // detected) and the most recent non-chrome line visible on screen — lets
+    // the "show all agents" list summarize what EVERY pooled terminal is
+    // doing right now, not just the ones currently blocked on a decision.
+    last_agent: Option<String>,
+    last_activity: Option<String>,
+    // Last screen snapshot that LOOKED like an interactive question but
+    // matched none of detect_prompt's known patterns — e.g. Codex/Cursor
+    // wording we couldn't verify ourselves. Deduped against so the debug log
+    // doesn't fill up with the same unmatched screen repeated on every
+    // render; only a genuinely new unmatched prompt gets logged.
+    last_unmatched_snapshot: Option<String>,
 }
 
 // Keyed by terminal window label ("terminal", "terminal2", ...) — the user
@@ -116,14 +128,74 @@ fn is_chrome_line(line: &str) -> bool {
     l == "waiting…"
         || l.contains('·')
         || l.contains("esc to cancel")
+        || l.contains("to auto-approve") // "shift+tab to auto-approve file edits" hint
+        || l == "pending edit" // Antigravity status line above the diff block
+        || l.starts_with("↑/↓") // "↑/↓ Navigate" menu hint
         || l.ends_with('…') // trailing "<RandomVerb>…" spinner fragment with nothing else on the line
+}
+
+// A full-width horizontal rule (or the top/bottom edge of a box) that these
+// CLIs draw immediately around an approval block. This is the single most
+// reliable boundary between the block that needs a decision and the terminal
+// scrollback above it (shell banner, CLI splash art, earlier turns) — a real
+// content line is essentially never ≥70% rule characters.
+fn is_divider_line(line: &str) -> bool {
+    const RULE_CHARS: &[char] = &[
+        '─', '═', '━', '—', '–', '-', '╭', '╮', '╰', '╯', '┏', '┓', '┗', '┛', '┄', '┅', '┈', '┉',
+    ];
+    let trimmed = line.trim();
+    let rule = trimmed.chars().filter(|c| RULE_CHARS.contains(c)).count();
+    // At least 6 rule chars AND nothing but rule chars / spaces — this cleanly
+    // covers both a solid "──────" rule and a spaced "- - - -" dashed one
+    // (Claude's edit prompt draws the latter above its question), while never
+    // matching a real content line that merely happens to contain a dash.
+    rule >= 6 && trimmed.chars().all(|c| c == ' ' || RULE_CHARS.contains(&c))
+}
+
+// Isolates just the approval block out of the full screen snapshot, using the
+// divider(s) drawn around it. Two layouts are handled from the one rule:
+//   * a single divider ABOVE the block, question below it (Antigravity) →
+//     take everything between that divider and the question;
+//   * the block fully WRAPPED in a box, question below the box (Claude) → the
+//     last divider before the question is the box's BOTTOM edge with nothing
+//     but the question under it, so fall back to the box interior (between the
+//     previous divider and this one).
+// With no divider at all, returns the whole range so the caller's tool-header
+// trim still applies (unverified agents that don't draw one).
+fn block_bounds(all_lines: &[&str], boundary: usize) -> (usize, usize) {
+    let dividers: Vec<usize> = all_lines[..boundary]
+        .iter()
+        .enumerate()
+        .filter(|(_, l)| is_divider_line(l))
+        .map(|(i, _)| i)
+        .collect();
+    match dividers.last() {
+        None => (0, boundary),
+        Some(&last) => {
+            let has_content_below = !clean_lines(&all_lines[last + 1..boundary]).is_empty();
+            if has_content_below {
+                (last + 1, boundary)
+            } else if dividers.len() >= 2 {
+                (dividers[dividers.len() - 2] + 1, last)
+            } else {
+                (0, last)
+            }
+        }
+    }
 }
 
 fn clean_lines(lines: &[&str]) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     for line in lines {
         let stripped: String = line.chars().filter(|c| !BORDER_CHARS.contains(c)).collect();
-        let trimmed = stripped.trim();
+        let mut trimmed = stripped.trim();
+        // Drop a trailing "(ctrl+o to expand)"-style affordance hint the CLIs
+        // append to tool-call lines — it's UI chrome, not part of the action.
+        if let Some(idx) = trimmed.rfind('(') {
+            if trimmed[idx..].to_lowercase().contains("to expand") {
+                trimmed = trimmed[..idx].trim_end();
+            }
+        }
         if trimmed.is_empty() || is_chrome_line(trimmed) {
             continue;
         }
@@ -184,15 +256,19 @@ fn cap_lines(lines: &[String], max_lines: usize, max_line_len: usize) -> Vec<Str
 }
 
 fn preview_tail(text: &str, max_lines: usize, max_line_len: usize) -> Vec<String> {
-    let lines: Vec<&str> = text.lines().collect();
-    let cleaned = clean_lines(&lines);
-    cap_lines(&cleaned, max_lines, max_line_len)
+    let all_lines: Vec<&str> = text.lines().collect();
+    let (top, bottom) = block_bounds(&all_lines, all_lines.len());
+    let cleaned = clean_lines(&all_lines[top..bottom]);
+    let trimmed: &[String] = if top == 0 { trim_to_tool_header(&cleaned) } else { &cleaned };
+    cap_lines(trimmed, max_lines, max_line_len)
 }
 
 // Stops the preview right before the prompt's own question line (e.g. "Do
 // you want to proceed?") since that question + its numbered options are
 // redundant with our own Approve/Deny buttons — only the tool/command
-// context above it is useful to show the user.
+// context above it is useful. That context is further narrowed to just the
+// approval block (see block_bounds) so shell banners / CLI splash art /
+// earlier turns above the block never leak into the preview.
 fn preview_before(buffer: &str, needle_lower: &str, max_lines: usize, max_line_len: usize) -> Vec<String> {
     let lower = buffer.to_lowercase();
     let lower_lines: Vec<&str> = lower.lines().collect();
@@ -200,10 +276,14 @@ fn preview_before(buffer: &str, needle_lower: &str, max_lines: usize, max_line_l
     let boundary = lower_lines
         .iter()
         .rposition(|l| l.contains(needle_lower))
-        .unwrap_or(all_lines.len());
-    let content = &all_lines[..boundary.min(all_lines.len())];
-    let cleaned = clean_lines(content);
-    let trimmed = trim_to_tool_header(&cleaned);
+        .unwrap_or(all_lines.len())
+        .min(all_lines.len());
+    let (top, bottom) = block_bounds(&all_lines, boundary);
+    let cleaned = clean_lines(&all_lines[top..bottom]);
+    // When a divider bounded the top, the block is already tight — a further
+    // tool-header trim risks wrongly cutting into it, so only apply that trim
+    // in the no-divider fallback.
+    let trimmed: &[String] = if top == 0 { trim_to_tool_header(&cleaned) } else { &cleaned };
     cap_lines(trimmed, max_lines, max_line_len)
 }
 
@@ -217,9 +297,35 @@ fn numbered_prompt(buffer: &str, needle_lower: &str, agent: &str) -> PendingProm
     let deny_n = highest_numbered_option(buffer).unwrap_or(2);
     PendingPrompt {
         agent: agent.to_string(),
-        preview: preview_before(buffer, needle_lower, 6, 110),
+        // Capped generously (was 6) — the preview now renders as a real
+        // diff view (see main.js) with its own internal scrollbar, so a
+        // multi-line Edit diff no longer needs to have its earlier "-"
+        // removal rows tail-truncated away just to fit a small flat text box.
+        preview: preview_before(buffer, needle_lower, 16, 120),
         approve_keys: b"1".to_vec(),
         deny_keys: deny_n.to_string().into_bytes(),
+    }
+}
+
+// Identifies which agent CLI is running from whatever's currently on screen,
+// independent of a permission prompt ever appearing — a session sitting idle
+// or just working (no prompt yet) would otherwise show as "Idle" in the
+// "show all agents" list forever, even though a real CLI is clearly running.
+// Scans the FULL buffer (not just the last line) since these signals are
+// typically a persistent status-footer/banner rather than the most recent
+// line specifically (e.g. Antigravity's model name stays pinned in its
+// footer every frame — see detect_prompt's antigravity/claude split above).
+fn detect_agent_hint(lower: &str) -> Option<&'static str> {
+    if lower.contains("gemini") || lower.contains("antigravity") {
+        Some("antigravity")
+    } else if lower.contains("claude code") {
+        Some("claude")
+    } else if lower.contains("codex") {
+        Some("codex")
+    } else if lower.contains("cursor-agent") || lower.contains("cursor agent") {
+        Some("cursor")
+    } else {
+        None
     }
 }
 
@@ -235,6 +341,19 @@ fn detect_prompt(buffer: &str) -> Option<PendingPrompt> {
     if lower.contains("allow access to this file?") {
         return Some(numbered_prompt(buffer, "allow access to this file?", "antigravity"));
     }
+    // Antigravity's actual file-edit confirmation ("Accept this file edit?",
+    // "1. Yes, accept this change" / "2. No, reject this change") — confirmed
+    // from real captured output, replacing an earlier guessed wording that
+    // never matched. Matched by prefix/suffix rather than the exact string so
+    // sibling prompts sharing the same shape (e.g. a command-accept variant)
+    // aren't missed if the exact wording differs slightly.
+    if let Some(needle) = lower
+        .lines()
+        .map(str::trim)
+        .find(|l| l.starts_with("accept this") && l.ends_with('?'))
+    {
+        return Some(numbered_prompt(buffer, needle, "antigravity"));
+    }
     if lower.contains("run without sandbox restrictions") {
         return Some(numbered_prompt(buffer, "run without sandbox restrictions", "antigravity"));
     }
@@ -242,23 +361,47 @@ fn detect_prompt(buffer: &str) -> Option<PendingPrompt> {
         return Some(numbered_prompt(buffer, "run in sandbox", "antigravity"));
     }
 
-    if lower.contains("do you want to proceed?") {
-        // Claude and Antigravity share this exact question text — Antigravity
-        // additionally always shows its model name ("Gemini ...") in its
-        // status footer, which stays in the visible viewport every frame, so
-        // that's used to tell the two apart instead of assuming Claude.
+    // Claude & Antigravity end an interactive approval with a "Do you want
+    // to ...?" question — the wording varies by tool: "proceed?" for a
+    // command, "make this edit to X?" for a file edit, "create X?" for a new
+    // file, etc. Matching the whole family by the "do you want to" opener
+    // (rather than one exact phrasing) is why Claude's *edit* prompt was
+    // being missed before while its *bash* prompt worked. Searched bottom-up
+    // so the actual trailing question is used as the preview cut-point, not
+    // an earlier mention of the same words in the scrollback.
+    if let Some(needle) = lower
+        .lines()
+        .map(str::trim)
+        .rev()
+        .find(|l| l.starts_with("do you want to") && l.ends_with('?'))
+    {
+        // Antigravity always shows its model name ("Gemini ...") pinned in
+        // its status footer every frame, which is used to tell the two apart
+        // instead of assuming Claude.
         let agent = if lower.contains("gemini") || lower.contains("antigravity") {
             "antigravity"
         } else {
             "claude"
         };
-        return Some(numbered_prompt(buffer, "do you want to proceed?", agent));
+        return Some(numbered_prompt(buffer, needle, agent));
+    }
+
+    // "Codex wants to run <command>" with "Yes" / "Always" / "No, provide
+    // feedback" options — sourced from a real user's pasted terminal output
+    // in openai/codex issue #2860 (second-hand, never captured directly by
+    // this app), so treated with the same numbered-menu convention as
+    // Claude/Antigravity as a best guess, refine from the debug log once
+    // actually exercised. Checked before the older "allow command?"/y-n
+    // guess so this more specific (and better-sourced) match wins if both
+    // somehow appear.
+    if lower.contains("codex wants to run") {
+        return Some(numbered_prompt(buffer, "codex wants to run", "codex"));
     }
 
     if lower.contains("allow command?") || lower.contains("[y/n") {
         return Some(PendingPrompt {
             agent: "codex".to_string(),
-            preview: preview_before(buffer, "allow command?", 6, 100),
+            preview: preview_before(buffer, "allow command?", 16, 120),
             approve_keys: b"y\r".to_vec(),
             deny_keys: b"n\r".to_vec(),
         });
@@ -271,7 +414,7 @@ fn detect_prompt(buffer: &str) -> Option<PendingPrompt> {
         if l.contains('?') && l.contains("y/n") {
             return Some(PendingPrompt {
                 agent: "cli".to_string(),
-                preview: preview_tail(buffer, 6, 100),
+                preview: preview_tail(buffer, 16, 120),
                 approve_keys: b"y\r".to_vec(),
                 deny_keys: b"n\r".to_vec(),
             });
@@ -328,6 +471,9 @@ pub fn start_terminal_session(app: tauri::AppHandle, window: tauri::WebviewWindo
                 writer,
                 child,
                 pending: None,
+                last_agent: None,
+                last_activity: None,
+                last_unmatched_snapshot: None,
             },
         );
     }
@@ -384,10 +530,29 @@ pub fn report_terminal_text(app: tauri::AppHandle, window: tauri::WebviewWindow,
     let label = window.label().to_string();
     let mut guard = sessions().lock().unwrap();
     let session = guard.get_mut(&label).ok_or("no active terminal session")?;
+
+    // Refreshed on every render regardless of pending-prompt state, so "show
+    // all agents" has something current to display for sessions that are
+    // just working (not currently blocked on a decision) too.
+    let lines: Vec<&str> = text.lines().collect();
+    let cleaned = clean_lines(&lines);
+    if let Some(last) = cleaned.last() {
+        session.last_activity = Some(last.clone());
+    }
+    // Only fills in an agent identity that isn't already known — a prompt
+    // actually being detected (below) is a stronger signal than this
+    // heuristic and should never be overwritten by it.
+    if session.last_agent.is_none() {
+        if let Some(agent) = detect_agent_hint(&text.to_lowercase()) {
+            session.last_agent = Some(agent.to_string());
+        }
+    }
+
     if session.pending.is_some() {
         return Ok(()); // already showing one, don't re-detect until resolved
     }
     if let Some(prompt) = detect_prompt(&text) {
+        session.last_agent = Some(prompt.agent.clone());
         let payload = PermissionRequestPayload {
             session_id: label.clone(),
             agent: prompt.agent.clone(),
@@ -401,6 +566,20 @@ pub fn report_terminal_text(app: tauri::AppHandle, window: tauri::WebviewWindow,
         // emit (not emit_to) is fine; the payload's session_id is what lets
         // the mascot tell multiple concurrent requests apart.
         let _ = app.emit("mascot-permission-request", payload);
+    } else if let Some(last) = cleaned.last() {
+        // No known pattern matched, but this still looks like it could be an
+        // interactive question (ends in '?', or shows a y/n-style hint) —
+        // log it (deduped so an unchanging screen doesn't spam every render)
+        // so an unrecognized Codex/Cursor/etc. prompt leaves a real trace to
+        // fix from, instead of silently vanishing with no card AND no record.
+        let looks_like_prompt = last.trim_end().ends_with('?') || last.to_lowercase().contains("y/n");
+        if looks_like_prompt && session.last_unmatched_snapshot.as_deref() != Some(last.as_str()) {
+            session.last_unmatched_snapshot = Some(last.clone());
+            append_debug_log(
+                &app,
+                &format!("[{label}] unmatched possible prompt (no card shown): {last}"),
+            );
+        }
     }
     Ok(())
 }
@@ -469,6 +648,41 @@ pub fn deny_permission(app: tauri::AppHandle, session_id: String) -> Result<(), 
         pending.deny_keys
     };
     write_keys(&session_id, &keys)
+}
+
+#[derive(Serialize, Clone)]
+pub struct SessionSummary {
+    session_id: String,
+    agent: Option<String>,
+    activity: Option<String>,
+    has_pending: bool,
+}
+
+// Backs the mascot's "Show all agents" list — every pooled terminal window
+// eagerly starts its own PTY session as soon as its (hidden) webview loads
+// (see terminal.js), so the SESSIONS map alone would include slots the user
+// never actually opened. Filtered down to windows that are currently VISIBLE
+// on screen, matching what the user actually thinks of as "the terminals
+// I've opened" rather than every pre-spawned pool slot.
+#[tauri::command]
+pub fn list_agent_sessions(app: tauri::AppHandle) -> Vec<SessionSummary> {
+    let guard = sessions().lock().unwrap();
+    let mut out: Vec<SessionSummary> = guard
+        .iter()
+        .filter(|(label, _)| {
+            app.get_webview_window(label)
+                .map(|w| w.is_visible().unwrap_or(false))
+                .unwrap_or(false)
+        })
+        .map(|(label, s)| SessionSummary {
+            session_id: label.clone(),
+            agent: s.last_agent.clone(),
+            activity: s.last_activity.clone(),
+            has_pending: s.pending.is_some(),
+        })
+        .collect();
+    out.sort_by(|a, b| a.session_id.cmp(&b.session_id));
+    out
 }
 
 // Called on app quit (see tray.rs) — kills every pooled session's shell

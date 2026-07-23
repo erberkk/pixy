@@ -311,6 +311,13 @@ window.addEventListener("DOMContentLoaded", () => {
   // main.js's dblclick handler (which also fired) takes over instead.
   mascotEl.addEventListener("click", (e) => {
     if (e.target.closest(".spotify-panel")) return; // let the panel's own controls handle their own clicks
+    // Any other overlay (agent permission card, GitHub digest, etc.) owns
+    // this click instead — checked up front, not just inside
+    // openSpotifyPanel(), because clicking e.g. Approve can revert the state
+    // back to idle by the time the 300ms single-click timer below fires,
+    // which would otherwise open the Spotify panel as an unintended side
+    // effect of a click that had nothing to do with it.
+    if (isNoticeLocked() || document.body.className !== "state-idle") return;
     if (clickTimer) {
       clearTimeout(clickTimer);
       clickTimer = null;
