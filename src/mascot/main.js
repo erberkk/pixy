@@ -1,4 +1,5 @@
 import { cancelSpotifyPanel } from "./spotify.js";
+import { computeAmbient } from "./signals.js";
 
 const { listen } = window.__TAURI__.event;
 
@@ -407,29 +408,31 @@ function openTerminal() {
   window.__TAURI__.core.invoke("open_terminal");
 }
 
+// Single-agent app — Claude Code only (see SETUP.md for the hook wiring
+// this depends on). Still an object (not a bare string) since
+// buildAgentSessionsList indexes it by whatever's in SessionSummary.agent.
 const AGENT_LABELS = {
   claude: "Claude",
-  codex: "Codex",
-  antigravity: "Antigravity",
-  cursor: "Cursor",
-  cli: "Agent CLI",
 };
 
 // terminalN -> "Terminal N" (plain "terminal" is slot 1) — used by both the
 // permission card header (implicitly, via session_id) and the "show all
-// agents" list rows.
+// agents" list rows. A null session_id means the hook fired with no
+// resolvable WIDGET_TERMINAL_LABEL (Claude running outside this app's pooled
+// terminals) — there's no window to name or focus, so say so instead of
+// guessing "Terminal 1".
 function terminalDisplayName(sessionId) {
-  const match = /(\d+)$/.exec(sessionId || "");
+  if (!sessionId) return "External session";
+  const match = /(\d+)$/.exec(sessionId);
   return match ? `Terminal ${match[1]}` : "Terminal 1";
 }
 
-// Pinned open like the digest card (see noticeLocked) — the embedded agent
-// terminals (terminal.rs) can each detect a permission prompt independently,
-// so this is a LIST of pending requests keyed by session_id (the terminal
-// window's label — "terminal", "terminal2", ...), one .permission-card per
-// entry, rather than a single slot — several agent CLIs (Claude in one
-// window, Antigravity/Codex/Cursor in others) can be waiting on a decision
-// at the same time, stacked vertically instead of shown one-at-a-time.
+// Pinned open like the digest card (see noticeLocked) — each pooled terminal
+// (terminal.rs) can have its own Claude Code session independently blocked on
+// a decision, so this is a LIST of pending requests, one .permission-card per
+// entry, stacked vertically instead of shown one-at-a-time. Keyed by
+// request_id (not session_id — a request with no resolvable terminal label
+// has session_id: null, and two such requests must still be told apart).
 let pendingPermissions = [];
 
 // Toggled by the "Show all agents" button — independent of pendingPermissions
@@ -437,106 +440,47 @@ let pendingPermissions = [];
 // from another terminal) until the user explicitly collapses it again.
 let allSessionsVisible = false;
 
-// Claude/Antigravity's Edit-tool previews are already unified-diff-shaped
-// text ("<path>  +N -M" header line, then "<lineno> <+/-> <code>" rows) —
-// rendering that as flat gray text (or just tinting whole lines) reads as an
-// undifferentiated wall of text. These two parsers pull out the structure so
-// it can be rendered like an actual code editor's diff view instead: a small
-// file-path header with +/- stat counts, then aligned line-number/marker/code
-// columns with a full-row tint per line — same idea as any real diff viewer.
-
-// "src/components/App.tsx  +2 -2" or a full Windows path with the same
-// trailing stat suffix — two+ spaces before the stats is the signal that
-// separates the path from the counts (paths can't contain a run of spaces
-// like that in practice).
-const DIFF_HEADER_RE = /^(.+?)\s{2,}([+-]\d+)(?:\s+([+-]\d+))?$/;
-
-// "12 + import foo" / "- removed line" (line number optional — not every
-// CLI's diff rows are numbered). The marker must be the very first
-// non-space character; "++"/"--" prefixes (diff hunk headers, decrement
-// operators) are excluded so those aren't misread as a real diff row.
-const DIFF_ROW_RE = /^(\d+)?\s*([+-])(?!\2)\s?(.*)$/;
-
-function parseDiffHeader(line) {
-  const m = DIFF_HEADER_RE.exec(line.trim());
-  if (!m) return null;
-  return { path: m[1], stats: [m[2], m[3]].filter(Boolean) };
+// tool_name/tool_input come straight from Claude Code's own PermissionRequest
+// hook payload (see terminal.rs's record_permission_request) — real
+// structured data, not text scraped off the rendered terminal screen, so
+// this renders each known tool shape directly instead of trying to parse
+// meaning out of a pre-rendered preview.
+function buildCodeBlock(text, extraClass = "") {
+  const box = document.createElement("div");
+  box.className = `permission-code ${extraClass}`.trim();
+  box.textContent = text;
+  return box;
 }
 
-function parseDiffRow(line) {
-  const m = DIFF_ROW_RE.exec(line);
-  if (!m) return null;
-  return { lineno: m[1] || "", marker: m[2], content: m[3] };
+function buildFilePathLine(path) {
+  const line = document.createElement("div");
+  line.className = "permission-file-path";
+  line.textContent = path;
+  return line;
 }
 
-function looksLikeDiffContent(line) {
-  return parseDiffHeader(line) !== null || parseDiffRow(line) !== null;
-}
-
-// Only a bare, short tool name ("Bash command", "Edit", "File access",
-// "Requested Permission: ...") is worth the uppercased badge treatment.
-// A line like "Write: C:/Users/.../README.md" is a real action detail with a
-// path in it — uppercasing that reads terribly, so it's rendered as a normal
-// monospace line instead.
-const TOOL_BADGE_WORDS = new Set([
-  "bash command", "write", "edit", "multiedit", "read", "webfetch", "file access", "task", "search",
-]);
-function isToolBadgeLine(line) {
-  const l = line.trim().toLowerCase();
-  return TOOL_BADGE_WORDS.has(l) || l.startsWith("requested permission");
-}
-
-function buildDiffHeaderRow(parsed) {
-  const row = document.createElement("div");
-  row.className = "diff-header";
-  const path = document.createElement("span");
-  path.className = "diff-header-path";
-  path.textContent = parsed.path;
-  row.appendChild(path);
-  const stats = document.createElement("span");
-  stats.className = "diff-header-stats";
-  for (const stat of parsed.stats) {
-    const s = document.createElement("span");
-    s.className = stat.startsWith("+") ? "diff-header-stat-add" : "diff-header-stat-remove";
-    s.textContent = stat;
-    stats.appendChild(s);
+// Simple line-level before/after (not a real LCS diff) — old_string/
+// new_string are exact, so even a flat "every old line removed, every new
+// line added" rendering is already far more accurate than the old
+// screen-scraped preview ever was, using the same add/remove row styling.
+function buildEditDiff(oldString, newString) {
+  const box = document.createElement("div");
+  box.className = "permission-preview";
+  for (const line of (oldString || "").split("\n")) {
+    box.appendChild(buildDiffRow("-", line));
   }
-  row.appendChild(stats);
-  return row;
+  for (const line of (newString || "").split("\n")) {
+    box.appendChild(buildDiffRow("+", line));
+  }
+  return box;
 }
 
-function buildDiffCodeRow(parsed) {
-  const row = document.createElement("div");
-  row.className = `diff-row ${parsed.marker === "+" ? "diff-row--add" : "diff-row--remove"}`;
-  const lineno = document.createElement("span");
-  lineno.className = "diff-lineno";
-  lineno.textContent = parsed.lineno;
-  row.appendChild(lineno);
-  const marker = document.createElement("span");
-  marker.className = "diff-marker";
-  marker.textContent = parsed.marker;
-  row.appendChild(marker);
-  const code = document.createElement("span");
-  code.className = "diff-code";
-  code.textContent = parsed.content;
-  row.appendChild(code);
-  return row;
-}
-
-// A wrapped continuation of the diff row above it: the terminal hard-wraps a
-// long changed line across several screen rows, and only the first carries
-// the "12 +" line-number/marker prefix — the rest arrive as plain lines. This
-// renders them with the same add/remove tint and column alignment (blank
-// line-number + marker gutter) so a wrapped diff line reads as one continuous
-// change instead of a tinted first line followed by untinted orphans.
-function buildDiffContinuationRow(marker, content) {
+function buildDiffRow(marker, content) {
   const row = document.createElement("div");
   row.className = `diff-row ${marker === "+" ? "diff-row--add" : "diff-row--remove"}`;
-  const lineno = document.createElement("span");
-  lineno.className = "diff-lineno";
-  row.appendChild(lineno);
   const markerCol = document.createElement("span");
   markerCol.className = "diff-marker";
+  markerCol.textContent = marker;
   row.appendChild(markerCol);
   const code = document.createElement("span");
   code.className = "diff-code";
@@ -545,10 +489,138 @@ function buildDiffContinuationRow(marker, content) {
   return row;
 }
 
-// preview[0] is rendered as a colored "tool" badge (e.g. "Bash command")
-// UNLESS it's already diff content itself (some captures start straight into
-// the diff with no separate tool-name line) — real visual hierarchy instead
-// of one flat stack of gray text.
+// Per-tool renderers — each returns an array of DOM nodes to append into the
+// card body. Falls back to pretty-printed JSON for any tool shape not
+// specifically handled below (new/renamed tools, MCP tools, etc.) so nothing
+// ever renders as a blank card.
+const TOOL_RENDERERS = {
+  Bash(input) {
+    const nodes = [buildCodeBlock(input.command || "")];
+    if (input.description) {
+      const desc = document.createElement("div");
+      desc.className = "permission-tool-desc";
+      desc.textContent = input.description;
+      nodes.unshift(desc);
+    }
+    return nodes;
+  },
+  Write(input) {
+    return [buildFilePathLine(input.file_path || ""), buildCodeBlock(input.content || "")];
+  },
+  Edit(input) {
+    return [buildFilePathLine(input.file_path || ""), buildEditDiff(input.old_string, input.new_string)];
+  },
+  MultiEdit(input) {
+    const nodes = [buildFilePathLine(input.file_path || "")];
+    for (const edit of input.edits || []) {
+      nodes.push(buildEditDiff(edit.old_string, edit.new_string));
+    }
+    return nodes;
+  },
+  Read(input) {
+    return [buildFilePathLine(input.file_path || "")];
+  },
+  Glob(input) {
+    return [buildCodeBlock(`${input.pattern || ""}${input.path ? "  in " + input.path : ""}`)];
+  },
+  Grep(input) {
+    return [buildCodeBlock(`${input.pattern || ""}${input.path ? "  in " + input.path : ""}`)];
+  },
+  WebFetch(input) {
+    return [buildCodeBlock(input.url || "")];
+  },
+  Task(input) {
+    const nodes = [];
+    if (input.subagent_type) nodes.push(buildCodeBlock(input.subagent_type, "permission-tool-desc"));
+    if (input.description) nodes.push(buildCodeBlock(input.description));
+    return nodes;
+  },
+};
+
+function renderToolInput(toolName, toolInput) {
+  const input = toolInput && typeof toolInput === "object" ? toolInput : {};
+  const renderer = TOOL_RENDERERS[toolName];
+  if (renderer) return renderer(input);
+  return [buildCodeBlock(JSON.stringify(toolInput, null, 2))];
+}
+
+// Renders Claude Code's AskUserQuestion tool the same way its own TUI does —
+// one or more questions, each with tappable option chips — instead of a
+// plain Approve/Deny card. Answers are collected client-side and sent back
+// as this same PermissionRequest hook's `updatedInput` (see server.rs's
+// resolve_decision / respond_permission), the same mechanism AgentGlance
+// uses on macOS: no keystrokes are simulated, Claude Code receives the
+// answer as if the user had picked it in its own prompt.
+function buildQuestionUI(req) {
+  const wrap = document.createElement("div");
+  wrap.className = "question-block";
+  const selections = new Map(); // question text -> Set of selected option labels
+
+  for (const q of req.questions) {
+    const qKey = q.question || q.header || "";
+    selections.set(qKey, new Set());
+
+    const qEl = document.createElement("div");
+    qEl.className = "question-item";
+    if (q.header) {
+      const qHeader = document.createElement("div");
+      qHeader.className = "question-header";
+      qHeader.textContent = q.header;
+      qEl.appendChild(qHeader);
+    }
+    const qText = document.createElement("div");
+    qText.className = "question-text";
+    qText.textContent = q.question || "";
+    qEl.appendChild(qText);
+
+    const optsWrap = document.createElement("div");
+    optsWrap.className = "question-options";
+    for (const opt of q.options || []) {
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "question-chip";
+      chip.textContent = opt.label;
+      chip.addEventListener("click", () => {
+        const set = selections.get(qKey);
+        if (q.multiSelect) {
+          if (set.has(opt.label)) {
+            set.delete(opt.label);
+            chip.classList.remove("selected");
+          } else {
+            set.add(opt.label);
+            chip.classList.add("selected");
+          }
+        } else {
+          set.clear();
+          set.add(opt.label);
+          for (const sibling of optsWrap.querySelectorAll(".question-chip")) {
+            sibling.classList.remove("selected");
+          }
+          chip.classList.add("selected");
+        }
+      });
+      optsWrap.appendChild(chip);
+    }
+    qEl.appendChild(optsWrap);
+    wrap.appendChild(qEl);
+  }
+
+  const submitBtn = document.createElement("button");
+  submitBtn.className = "permission-btn permission-btn--approve question-submit";
+  submitBtn.textContent = "Submit";
+  submitBtn.addEventListener("click", () => {
+    const answers = {};
+    for (const [qKey, set] of selections) {
+      if (set.size === 0) return; // every question needs at least one pick before submitting
+      answers[qKey] = set.size === 1 ? [...set][0] : [...set];
+    }
+    resolveQuestionPermission(req.request_id, req.questions, answers);
+  });
+  wrap.appendChild(submitBtn);
+
+  return wrap;
+}
+
 function renderPermissionList() {
   const notice = document.getElementById("notice");
   notice.innerHTML = "";
@@ -561,8 +633,8 @@ function renderPermissionList() {
     header.className = "permission-header";
 
     const badge = document.createElement("span");
-    badge.className = `agent-badge agent-badge--${req.agent || "cli"}`;
-    badge.textContent = AGENT_LABELS[req.agent] || req.agent;
+    badge.className = "agent-badge agent-badge--claude";
+    badge.textContent = "Claude";
     header.appendChild(badge);
 
     const source = document.createElement("span");
@@ -572,66 +644,57 @@ function renderPermissionList() {
 
     const text = document.createElement("span");
     text.className = "permission-header-text";
-    text.textContent = "needs approval";
+    text.textContent = req.questions ? "asked" : "needs approval";
     header.appendChild(text);
+
+    // For requests with no resolvable terminal (session_id null — Claude
+    // running outside this app's pooled terminals, see terminalDisplayName),
+    // there's no automatic way to tell "still genuinely pending" apart from
+    // "the hook that asked already gave up client-side and nobody will ever
+    // answer this" (AgentGlance solves the equivalent case by auto-flushing
+    // on the session's next forward-progress hook; this app doesn't track
+    // those events or attempt session correlation for unlabeled requests).
+    // Dismiss is the manual equivalent — discards the card and answers
+    // "deny" so the connection doesn't sit open forever either way.
+    const dismissBtn = document.createElement("button");
+    dismissBtn.className = "permission-dismiss-btn";
+    dismissBtn.textContent = "×";
+    dismissBtn.title = "Dismiss (denies the request)";
+    dismissBtn.addEventListener("click", () => {
+      window.__TAURI__.core
+        .invoke("dismiss_permission", { requestId: req.request_id })
+        .finally(() => finishResolvedPermission(req.request_id));
+    });
+    header.appendChild(dismissBtn);
+
     card.appendChild(header);
 
-    const lines = (Array.isArray(req.preview) ? req.preview : [req.preview]).filter(Boolean);
-    const box = document.createElement("div");
-    box.className = "permission-preview";
-
-    let bodyLines = lines;
-    if (lines.length > 0 && isToolBadgeLine(lines[0])) {
+    if (req.questions) {
+      card.appendChild(buildQuestionUI(req));
+    } else {
       const tool = document.createElement("div");
       tool.className = "permission-tool";
-      tool.textContent = lines[0];
-      box.appendChild(tool);
-      bodyLines = lines.slice(1);
-    }
+      tool.textContent = req.tool_name || "Unknown";
+      card.appendChild(tool);
 
-    // Tracks whether we're mid-diff-row so a plain (marker-less) line can be
-    // recognized as a wrapped continuation of the change above it and tinted
-    // to match. Reset by a header or a fresh diff row; a genuine non-diff line
-    // only appears after the diff block ends (blocks are divider-bounded, so
-    // in practice that's end-of-preview), keeping false continuations rare.
-    let activeDiffMarker = null;
-    for (const line of bodyLines) {
-      const header = parseDiffHeader(line);
-      if (header) {
-        box.appendChild(buildDiffHeaderRow(header));
-        activeDiffMarker = null;
-        continue;
+      for (const node of renderToolInput(req.tool_name, req.tool_input)) {
+        card.appendChild(node);
       }
-      const diffRow = parseDiffRow(line);
-      if (diffRow) {
-        box.appendChild(buildDiffCodeRow(diffRow));
-        activeDiffMarker = diffRow.marker;
-        continue;
-      }
-      if (activeDiffMarker) {
-        box.appendChild(buildDiffContinuationRow(activeDiffMarker, line));
-        continue;
-      }
-      const row = document.createElement("div");
-      row.className = "permission-line";
-      row.textContent = line;
-      box.appendChild(row);
-    }
-    card.appendChild(box);
 
-    const actions = document.createElement("div");
-    actions.className = "permission-actions";
-    const approveBtn = document.createElement("button");
-    approveBtn.className = "permission-btn permission-btn--approve";
-    approveBtn.textContent = "Approve";
-    approveBtn.addEventListener("click", () => resolveAgentPermission(req.session_id, true));
-    const denyBtn = document.createElement("button");
-    denyBtn.className = "permission-btn permission-btn--deny";
-    denyBtn.textContent = "Deny";
-    denyBtn.addEventListener("click", () => resolveAgentPermission(req.session_id, false));
-    actions.appendChild(approveBtn);
-    actions.appendChild(denyBtn);
-    card.appendChild(actions);
+      const actions = document.createElement("div");
+      actions.className = "permission-actions";
+      const approveBtn = document.createElement("button");
+      approveBtn.className = "permission-btn permission-btn--approve";
+      approveBtn.textContent = "Approve";
+      approveBtn.addEventListener("click", () => resolveAgentPermission(req.request_id, true));
+      const denyBtn = document.createElement("button");
+      denyBtn.className = "permission-btn permission-btn--deny";
+      denyBtn.textContent = "Deny";
+      denyBtn.addEventListener("click", () => resolveAgentPermission(req.request_id, false));
+      actions.appendChild(approveBtn);
+      actions.appendChild(denyBtn);
+      card.appendChild(actions);
+    }
 
     notice.appendChild(card);
   }
@@ -727,7 +790,7 @@ function buildAgentSessionsList(sessions) {
   return list;
 }
 
-function showAgentPermissionNotice({ session_id, agent, preview }) {
+function showAgentPermissionNotice({ session_id, request_id, tool_name, tool_input, questions }) {
   if (revertTimer) {
     clearTimeout(revertTimer);
     revertTimer = null;
@@ -735,11 +798,12 @@ function showAgentPermissionNotice({ session_id, agent, preview }) {
   noticeLocked = true;
   document.body.className = "state-agent_permission";
 
-  const existing = pendingPermissions.findIndex((p) => p.session_id === session_id);
+  const existing = pendingPermissions.findIndex((p) => p.request_id === request_id);
+  const entry = { session_id, request_id, tool_name, tool_input, questions };
   if (existing >= 0) {
-    pendingPermissions[existing] = { session_id, agent, preview };
+    pendingPermissions[existing] = entry;
   } else {
-    pendingPermissions.push({ session_id, agent, preview });
+    pendingPermissions.push(entry);
   }
 
   renderPermissionList();
@@ -748,22 +812,39 @@ function showAgentPermissionNotice({ session_id, agent, preview }) {
   reportHotRectSoon();
 }
 
-function resolveAgentPermission(sessionId, approve) {
-  const command = approve ? "approve_permission" : "deny_permission";
-  window.__TAURI__.core
-    .invoke(command, { sessionId })
-    .finally(() => {
-      pendingPermissions = pendingPermissions.filter((p) => p.session_id !== sessionId);
-      if (pendingPermissions.length === 0) {
-        noticeLocked = false;
-        allSessionsVisible = false;
-        document.body.className = "state-idle";
-      } else {
-        renderPermissionList();
-      }
-      reportHotRectSoon();
-    });
+// Shared cleanup after any pending request resolves — pulled out since both
+// a plain Approve/Deny and an AskUserQuestion Submit need the exact same
+// card-list bookkeeping afterwards, just with a different Tauri command call.
+function finishResolvedPermission(requestId) {
+  pendingPermissions = pendingPermissions.filter((p) => p.request_id !== requestId);
+  if (pendingPermissions.length === 0) {
+    noticeLocked = false;
+    allSessionsVisible = false;
+    document.body.className = "state-idle";
+  } else {
+    renderPermissionList();
+  }
+  reportHotRectSoon();
+  computeAmbient(); // don't wait up to 5s for "waiting" to clear once this resolves
 }
+
+function resolveAgentPermission(requestId, approve) {
+  window.__TAURI__.core
+    .invoke("respond_permission", { requestId, approve, updatedInput: null })
+    .finally(() => finishResolvedPermission(requestId));
+}
+
+// AskUserQuestion answers travel back as the SAME PermissionRequest hook's
+// updatedInput (server.rs's resolve_decision) — echoing the original
+// `questions` array back alongside `answers` mirrors the shape Claude Code's
+// own AskUserQuestion tool expects when a hook supplies the answer, matching
+// AgentGlance's proven contract rather than guessing a new one.
+function resolveQuestionPermission(requestId, questions, answers) {
+  window.__TAURI__.core
+    .invoke("respond_permission", { requestId, approve: true, updatedInput: { questions, answers } })
+    .finally(() => finishResolvedPermission(requestId));
+}
+
 
 function hideQuickMenu() {
   document.getElementById("quick-menu").classList.remove("visible");
@@ -799,6 +880,36 @@ window.addEventListener("DOMContentLoaded", () => {
   mascotEl.addEventListener("dblclick", () => {
     cancelSpotifyPanel();
     openTerminal();
+  });
+
+  // Window dragging, implemented by hand instead of the native
+  // data-tauri-drag-region attribute — that attribute hijacks the window
+  // move on the very first mousedown unconditionally, which silently
+  // swallowed the "click" event for a plain stationary click (confirmed by
+  // simulating a real OS-level click with and without the attribute
+  // present — this is what broke the Spotify hover panel's single-click
+  // open). Tracking movement ourselves and only calling startDragging()
+  // once the cursor has actually moved past a small deadzone means a real
+  // click (mousedown+mouseup with no/negligible movement) never touches
+  // this at all, leaving click/dblclick/contextmenu completely unaffected.
+  const DRAG_THRESHOLD_PX = 4;
+  let dragStart = null;
+  mascotEl.addEventListener("mousedown", (e) => {
+    if (e.button !== 0) return; // left button only
+    if (e.target.closest("button, input, .permission-btn, .spotify-btn, .toggle-btn")) return;
+    dragStart = { x: e.clientX, y: e.clientY };
+  });
+  window.addEventListener("mousemove", (e) => {
+    if (!dragStart) return;
+    const dx = e.clientX - dragStart.x;
+    const dy = e.clientY - dragStart.y;
+    if (Math.hypot(dx, dy) > DRAG_THRESHOLD_PX) {
+      dragStart = null;
+      window.__TAURI__.window.getCurrentWindow().startDragging();
+    }
+  });
+  window.addEventListener("mouseup", () => {
+    dragStart = null;
   });
 
   // Right-click opens a small round-icon menu below the pill instead of the

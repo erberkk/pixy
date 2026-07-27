@@ -54,14 +54,13 @@ pub fn hide_settings(app: tauri::AppHandle) {
 }
 
 // Fixed pool of pre-declared terminal windows (see tauri.conf.json) — one
-// per concurrently-running agent CLI the user wants open at once (Claude in
-// one, Antigravity/Codex/Cursor in others). Dynamic window creation hangs
-// in this environment (see module comment above), so "open another
-// terminal" means "reveal the next not-yet-visible slot in this pool"
-// rather than actually creating a new window. 16 is not a "real" limit
-// meant to constrain usage — nobody realistically runs that many agent
-// CLIs at once — it's just how many hidden WebView2 instances get spawned
-// at app startup (each has a real memory/CPU cost even while hidden), so
+// per concurrently-running Claude Code session the user wants open at once.
+// Dynamic window creation hangs in this environment (see module comment
+// above), so "open another terminal" means "reveal the next not-yet-visible
+// slot in this pool" rather than actually creating a new window. 16 is not
+// a "real" limit meant to constrain usage — nobody realistically runs that
+// many sessions at once — it's just how many hidden WebView2 instances get
+// spawned at app startup (each has a real memory/CPU cost even while hidden), so
 // the number is generous rather than unbounded. Bump this (and mirror the
 // new labels into tauri.conf.json + capabilities/default.json) if it's
 // ever actually hit.

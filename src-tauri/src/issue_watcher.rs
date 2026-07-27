@@ -194,7 +194,7 @@ fn poll_for_issue_updates(app: &tauri::AppHandle) {
             match fetch_last_comment(&token, &item.repo, item.number, item.comments) {
                 Some((author, body)) if author != username => {
                     append_debug_log(app, &format!("issue-watcher: {key} new comment by {author}"));
-                    let snippet: String = body.chars().take(120).collect();
+                    let snippet: String = body.chars().take(400).collect();
                     let _ = app.emit(
                         "github-issue-update",
                         json!({

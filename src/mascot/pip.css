@@ -1,0 +1,305 @@
+/* Pip pixel-art sprite: pill row (slot canvas + title/sub + indicator) and
+   the state->accent color table, ported from pip-pixel.html. This file only
+   controls the SPRITE's look (accent color, pose indicator, text) via
+   #mascot's data-pip-state attribute — it never sets #mascot's box size or
+   visibility, which stays driven by main.js's existing state-* classes on
+   <body> (see pip.js's header comment for why the two are kept separate). */
+
+#mascot {
+  --a: #5ad1e6;
+  --a2: #b6f0fa;
+}
+
+#mascot[data-pip-state="thinking"] { --a: #a58bff; }
+#mascot[data-pip-state="coding"] { --a: #4fd68a; }
+#mascot[data-pip-state="debugging"] { --a: #ff9d5c; }
+#mascot[data-pip-state="reviewing"] { --a: #9fb2d8; }
+#mascot[data-pip-state="deploying"] { --a: #e864d8; }
+#mascot[data-pip-state="syncing"] { --a: #3fd0c0; }
+#mascot[data-pip-state="waiting"] { --a: #d9c27a; }
+#mascot[data-pip-state="working"] { --a: #59a9ff; }
+#mascot[data-pip-state="writing"] { --a: #ffd9a0; }
+#mascot[data-pip-state="call"] { --a: #6be0a8; }
+#mascot[data-pip-state="break"] { --a: #f0a868; }
+#mascot[data-pip-state="listening"] { --a: #ff7ab8; }
+#mascot[data-pip-state="streaming"] { --a: #ff5c8a; }
+#mascot[data-pip-state="happy"] { --a: #ffc247; }
+#mascot[data-pip-state="alert"] { --a: #ff6f7d; }
+#mascot[data-pip-state="sleeping"] { --a: #6f6be0; }
+#mascot[data-pip-state="lowpower"] { --a: #8d93a8; }
+/* app-specific extras beyond the original pip-pixel set (see PIP_META in
+   pip.js) — gaming is deliberately excluded from automatic wiring but keeps
+   its accent/pose here so Pip.set('gaming') still works if invoked by hand. */
+#mascot[data-pip-state="gaming"] { --a: #b06bff; }
+#mascot[data-pip-state="juggling"] { --a: #55c8e0; }
+#mascot[data-pip-state="forgotten"] { --a: #ff8a5c; }
+#mascot[data-pip-state="review_requested"] { --a: #7ea8ff; }
+#mascot[data-pip-state="mentioned"] { --a: #c48bff; }
+#mascot[data-pip-state="assigned"] { --a: #58a9ff; }
+#mascot[data-pip-state="digest_ready"] { --a: #e8b04b; }
+#mascot[data-pip-state="welcome_back"] { --a: #ffc247; }
+
+.pip-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+}
+
+/* True idle: only .pip-slot is visible in this row (text/indicator hidden
+   below) — shrink the row to that icon's own width instead of staying
+   100% wide with flex-start, which left it pinned to the left edge inside
+   #mascot's circle instead of centered. */
+#mascot[data-pip-state="idle"] .pip-row {
+  width: auto;
+  justify-content: center;
+}
+
+/* No background of its own — #mascot's own background (styles.css) is the
+   only layer; giving the icon a second background here read as a
+   double-layered box behind box look. */
+.pip-slot {
+  flex: 0 0 36px;
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+}
+
+.pip-canvas {
+  width: 36px;
+  height: 36px;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  display: block;
+}
+
+/* True idle: mascot alone, no text competing for space, sized up so the
+   pixel art actually reads clearly instead of sitting small in a wide
+   empty pill. */
+#mascot[data-pip-state="idle"] .pip-slot,
+#mascot[data-pip-state="idle"] .pip-canvas {
+  flex-basis: 44px;
+  width: 44px;
+  height: 44px;
+}
+
+#mascot[data-pip-state="idle"] .pip-text,
+#mascot[data-pip-state="idle"] .pip-ind {
+  display: none;
+}
+
+.pip-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Minimal by design — just enough to name the current state, not a full
+   label + description pair (that read as unnecessarily wide/loud for a
+   small always-on-top pill). See .pip-sub below: intentionally hidden.
+   Centered (not left-aligned against the icon) so it reads as sitting
+   between the icon and the indicator, not crowded against either one. */
+.pip-title {
+  font-family: -apple-system, "Segoe UI", sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  text-transform: none;
+  text-align: center;
+  color: #9aa1b5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pip-sub {
+  display: none;
+}
+
+.pip-ind {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  display: grid;
+  place-items: center;
+}
+.pip-ind > * {
+  display: none;
+}
+.pip-ind[data-ind="dots"] .i-dots,
+.pip-ind[data-ind="ring"] .i-ring,
+.pip-ind[data-ind="caret"] .i-caret,
+.pip-ind[data-ind="eq"] .i-eq,
+.pip-ind[data-ind="moon"] .i-moon,
+.pip-ind[data-ind="check"] .i-check,
+.pip-ind[data-ind="bang"] .i-bang,
+.pip-ind[data-ind="rec"] .i-rec,
+.pip-ind[data-ind="bat"] .i-bat {
+  display: flex;
+}
+
+.i-dots {
+  gap: 2px;
+  align-items: center;
+}
+.i-dots i {
+  width: 3px;
+  height: 3px;
+  background: var(--a);
+  animation: pip-dot 1.2s steps(1) infinite;
+}
+.i-dots i:nth-child(2) {
+  animation-delay: 0.2s;
+}
+.i-dots i:nth-child(3) {
+  animation-delay: 0.4s;
+}
+@keyframes pip-dot {
+  0%,
+  60% {
+    opacity: 0.2;
+  }
+  30% {
+    opacity: 1;
+  }
+}
+
+.i-ring {
+  width: 13px;
+  height: 13px;
+  background: conic-gradient(from 0deg, transparent 0 30%, var(--a) 95%, transparent);
+  -webkit-mask: radial-gradient(circle, transparent 3.6px, #000 4.1px);
+  mask: radial-gradient(circle, transparent 3.6px, #000 4.1px);
+  animation: pip-spin 1s steps(8) infinite;
+}
+@keyframes pip-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.i-caret {
+  width: 6px;
+  height: 11px;
+  background: var(--a);
+  animation: pip-blinkc 1s steps(1) infinite;
+}
+@keyframes pip-blinkc {
+  50% {
+    opacity: 0;
+  }
+}
+
+.i-eq {
+  gap: 2px;
+  align-items: flex-end;
+  height: 13px;
+}
+.i-eq i {
+  width: 2px;
+  height: 3px;
+  background: var(--a);
+  animation: pip-eq 0.5s steps(3) infinite alternate;
+}
+.i-eq i:nth-child(2) {
+  animation-delay: -0.2s;
+}
+.i-eq i:nth-child(3) {
+  animation-delay: -0.35s;
+}
+.i-eq i:nth-child(4) {
+  animation-delay: -0.1s;
+}
+@keyframes pip-eq {
+  to {
+    height: 13px;
+  }
+}
+
+.i-moon {
+  width: 11px;
+  height: 11px;
+  box-shadow: inset -4px 2px 0 0 var(--a);
+  animation: pip-br 4s steps(2) infinite;
+}
+@keyframes pip-br {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 0.95;
+  }
+}
+
+.i-check,
+.i-bang {
+  font: 600 12px/1 ui-monospace, Consolas, monospace;
+  color: var(--a);
+  align-items: center;
+}
+
+.i-rec {
+  gap: 3px;
+  align-items: center;
+}
+.i-rec i {
+  width: 6px;
+  height: 6px;
+  background: var(--a);
+  animation: pip-rec 1.1s steps(1) infinite;
+}
+.i-rec b {
+  font: 600 7px/1 ui-monospace, Consolas, monospace;
+  letter-spacing: 0.1em;
+  color: var(--a);
+}
+@keyframes pip-rec {
+  50% {
+    opacity: 0.15;
+  }
+}
+
+.i-bat {
+  width: 15px;
+  height: 8px;
+  border: 1px solid var(--a);
+  position: relative;
+  align-items: center;
+  padding: 1px;
+}
+.i-bat::after {
+  content: "";
+  position: absolute;
+  right: -3px;
+  top: 2px;
+  width: 2px;
+  height: 3px;
+  background: var(--a);
+}
+.i-bat i {
+  width: 3px;
+  height: 100%;
+  background: var(--a);
+  animation: pip-drain 3s steps(1) infinite;
+}
+@keyframes pip-drain {
+  50% {
+    opacity: 0.2;
+  }
+}
+
+.i-bang {
+  animation: pip-nudge 0.4s steps(2) infinite;
+}
+@keyframes pip-nudge {
+  50% {
+    transform: translateX(2px);
+  }
+}

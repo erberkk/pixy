@@ -25,6 +25,13 @@
   min-height: 230px;
   max-height: 420px;
   border-radius: 20px;
+  /* #mascot (styles.css) is a CSS grid by default (icon column + content
+     column, shared across every state) — .spotify-panel is the one thing
+     that wants its own plain flex column instead (it's the sole visible
+     child here, .pip-row is hidden below), so this overrides display back
+     to flex entirely rather than trying to fit it into the grid tracks. */
+  display: flex;
+  flex-direction: column;
   align-items: stretch;
   justify-content: flex-start;
   padding: 14px 16px;
@@ -40,7 +47,7 @@
   transition: width 0.15s ease, border-radius 0.15s ease, padding 0.15s ease;
 }
 
-.state-idle #mascot.spotify-hover .face {
+.state-idle #mascot.spotify-hover .pip-row {
   display: none;
 }
 

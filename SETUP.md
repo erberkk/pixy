@@ -17,8 +17,8 @@ rather than replacing the whole file.
         "hooks": [
           {
             "type": "command",
-            "command": "IN=$(cat); echo \"$IN\" | curl -s -X POST http://127.0.0.1:47623/decide -H \"Content-Type: application/json\" -d @-",
-            "timeout": 5
+            "command": "IN=$(cat); echo \"$IN\" | curl -s -X POST \"http://127.0.0.1:47623/decide?label=$WIDGET_TERMINAL_LABEL\" -H \"Content-Type: application/json\" -d @-",
+            "timeout": 3600
           }
         ]
       }
@@ -77,35 +77,77 @@ rather than replacing the whole file.
 
 ## Design decisions (and why)
 
-**Notification-only, no in-widget answering.** An earlier version tried to let
-the widget itself answer permission prompts (blocking the `PermissionRequest`
-hook until you clicked Allow/Deny in the widget, returning
-`{"decision":"approve"|"block"}` on the hook's stdout). That contract is real
-— confirmed directly from the installed Claude Code binary's embedded
-strings — but it only appears to affect **headless/auto-mode** execution.
-For a normal interactive VS Code/CLI session, the human-facing prompt is the
-actual approval mechanism regardless of what the hook returns. So `/decide`
-responds immediately with `{"decision":"ask"}` (defer to normal behavior) and
-never blocks — it exists purely to trigger the widget's notification without
-adding any latency to your real workflow.
+**The hook itself answers the prompt — no PTY keystrokes involved.** An
+earlier version of this file claimed the `PermissionRequest` hook's JSON
+decision (`{"hookSpecificOutput":{"decision":{"behavior":"allow"|"deny",
+...}}}`) only takes effect in headless/auto-mode, and that a normal
+interactive terminal session could only be answered by writing real
+keystrokes into its PTY. That claim was **wrong** — confirmed against
+Claude Code's own hook documentation (code.claude.com/docs/en/hooks): the
+hook's decision is honored in interactive sessions too, auto-answering the
+prompt before it's even shown. This is exactly how AgentGlance (a comparable
+macOS tool for Claude Code) does it, and this app now works the same way.
 
-**Fixed notice text, not the actual command/tool content.** Showing the real
-`tool_name`/`tool_input` from the hook payload looked cramped and
-inconsistent in practice. The widget just shows a fixed
-"Claude is waiting for your approval" style message for every
-permission/notification event instead.
+So `/decide`'s HTTP request is held open — not responded to immediately —
+for as long as it takes the human to click Approve/Deny (or, for
+`AskUserQuestion`, pick option chips and hit Submit) in the mascot. Claude
+Code itself blocks the tool call on that response, so approving/denying from
+the widget IS the decision; `terminal.rs` no longer writes `"1"` or any
+other digit into the terminal's PTY for this at all — that entire mechanism
+(`highest_numbered_option`, `wait_for_prompt_visible`, `write_keys`) was
+deleted. The PTY is now purely a rendering surface for whatever the user
+types themselves; `WIDGET_TERMINAL_LABEL` is used only to flag *which*
+terminal's "show all agents" row should show a pending dot, not to route any
+keystroke.
 
-**Instant collapse on approve, best-effort on deny.** `PreToolUse` fires
-unconditionally right as an approved tool is about to run (confirmed
-unconditional in the Claude Code binary — not gated by auto-mode/classifier
-like the two hooks below), so approving in your editor/terminal collapses
-the pill almost immediately. `PermissionDenied`, however, **only fires for
-auto-mode/classifier-driven denials** — clicking "No" in the interactive
-prompt does not trigger it at all (confirmed the same way: its call site is
-wrapped in `if (decisionReason.type === "classifier" && decisionReason.classifier === "auto-mode")`).
-So there is no reliable "the human just clicked Deny" signal — the widget's
-own 6-second safety timeout is what actually closes it in that case, not a
-hook.
+**Because the timeout must span the human, not the network.** Holding the
+hook's HTTP connection open for potentially minutes (however long the
+person takes to decide) means the hook's own `timeout` in `settings.json`
+must be generous — set to 3600s above, not the 5s that was fine when
+`/decide` used to respond instantly. If this hook ever times out before you
+click, Claude Code falls back to showing its own interactive prompt as if no
+hook existed — annoying but not unsafe.
+
+**`AskUserQuestion` gets its own rendering, not a generic Approve/Deny.**
+When the hook's `tool_name` is `AskUserQuestion`, its `tool_input.questions`
+array (`question`/`header`/`options[].label`/`multiSelect` per question — the
+exact shape Claude Code's own multi-choice prompt renders from) is parsed
+out and shown as tappable option chips (see `main.js`'s `buildQuestionUI`).
+Submitting sends the answer back as the *same* hook response, with
+`updatedInput: {questions, answers}` instead of `updatedInput` left unset —
+matching AgentGlance's own answer contract, since Claude Code doesn't
+document this specific shape itself. No keystrokes here either.
+
+**What stayed the same:** `tool_name`/`tool_input` are still real, structured
+data parsed straight from the hook payload (not text scraped off the
+rendered terminal screen), and `label` still identifies which pooled
+terminal window the session is running in (see `WIDGET_TERMINAL_LABEL`
+below) so the permission card can say e.g. "Terminal 2" instead of a bare
+generic notice. This app is still Claude Code only — no Codex/Cursor/
+Antigravity support.
+
+**`WIDGET_TERMINAL_LABEL` correlates a hook event to a terminal window.**
+`terminal.rs` sets this env var when it spawns each pooled terminal's shell
+(`"terminal"`, `"terminal2"`, ...) — it's inherited down the process tree
+(shell → `claude` → the hook's own child process), so the hook command above
+can read it straight back via `$WIDGET_TERMINAL_LABEL` with no IPC needed to
+establish the mapping. If it's unset (e.g. Claude Code running outside one
+of this app's pooled terminals), the card still renders — it just says
+"External session" instead of "Terminal 2" and there's no terminal window to
+focus or flag a pending dot on; the decision itself still resolves the same
+way regardless.
+
+**`PreToolUse`/`PermissionDenied` are about ambient mood, not the permission
+card.** The permission card itself never needs a safety timeout anymore — it
+closes the instant Approve/Deny/Submit resolves the held-open hook request,
+deterministically, every time. `PreToolUse` (fires unconditionally right as
+an approved tool is about to run) and `PermissionDenied` (fires only for
+auto-mode/classifier-driven denials, confirmed by its call site being
+wrapped in `if (decisionReason.type === "classifier" && decisionReason.classifier === "auto-mode")`
+— clicking "No" in a genuinely interactive prompt doesn't trigger it at all)
+exist solely to drive the pip ambient mood's "coding" vs "idle" signal (see
+`signals.js`), which is a separate, lower-stakes concern from the permission
+card's own state.
 
 **The window never resizes at runtime — only CSS does.** The OS window is
 created once at a fixed size (large enough for the biggest expanded state,
@@ -119,12 +161,12 @@ native-resize/webview-repaint mismatch entirely.
 
 ## States the mascot reacts to
 
-| State                | Fired by                                    | Mascot behavior                                          |
-|----------------------|------------------------------------------------|-------------------------------------------------------------|
-| `waiting_permission` | `PermissionRequest`                            | Expanded pill, "waiting for your approval" text, double beep |
-| `waiting_input`      | `Notification`                                 | Expanded pill, different text, softer single chime         |
-| `idle`               | `PreToolUse` / `PermissionDenied` / default    | Collapses immediately back to the small idle pill          |
-| `turn_done`          | `Stop`                                          | Brief brightness flash + quiet tick, then settles to idle   |
+| State               | Fired by                                    | Mascot behavior                                                    |
+|---------------------|------------------------------------------------|---------------------------------------------------------------------|
+| `agent_permission`  | `PermissionRequest` (any — `label` resolvable or not) | Pinned card: real tool name/command/diff + Approve/Deny, or (for `AskUserQuestion`) tappable option chips + Submit. Answering resolves the held-open hook request directly — no PTY keystrokes. |
+| `waiting_input`     | `Notification`                                 | Expanded pill, different text, softer single chime                  |
+| `idle`              | `PreToolUse` / `PermissionDenied` / default     | Collapses immediately back to the small idle pill                   |
+| `turn_done`         | `Stop`                                          | Brief brightness flash + quiet tick, then settles to idle            |
 
 ## Manual test (without Claude Code)
 
@@ -132,7 +174,22 @@ With the widget running (`npm run tauri dev`), verify each state from a shell:
 
 ```bash
 curl -X POST http://127.0.0.1:47623/event -d "{\"state\":\"waiting_input\"}"
+
+# /decide now HOLDS THE CONNECTION OPEN until you click Approve/Deny in the
+# widget — curl will just sit there (that's correct, not a hang). Its
+# response body is Claude Code's own decision JSON, printed once you answer:
 curl -X POST http://127.0.0.1:47623/decide -d "{\"tool_name\":\"Bash\"}"
+
+# Rich per-terminal card — label must match an actually-open pooled terminal
+# window ("terminal", "terminal2", ...) to see it, and to see the request
+# clear that terminal's pending flag in "show all agents" once answered:
+curl -X POST "http://127.0.0.1:47623/decide?label=terminal" \
+  -d "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"ls -la\"}}"
+
+# AskUserQuestion — renders as tappable option chips instead of Approve/Deny;
+# submitting sends the answer back as this same curl's response body:
+curl -X POST http://127.0.0.1:47623/decide -d '{"tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"Which approach?","header":"Approach","multiSelect":false,"options":[{"label":"Option A"},{"label":"Option B"}]}]}}'
+
 curl -X POST http://127.0.0.1:47623/event -d "{\"state\":\"idle\"}"
 curl -X POST http://127.0.0.1:47623/event -d "{\"state\":\"turn_done\"}"
 ```
@@ -198,7 +255,9 @@ up again after future changes:
 - The port (`47623`) is currently hardcoded in `src-tauri/src/lib.rs`. Change
   it there and in the hooks above together if it conflicts with something
   else on your machine.
-- This wiring only covers the Claude Code CLI/VS Code extension. There is no
-  publicly documented equivalent hook system for Codex CLI, Cursor, or
-  Antigravity yet — those would need separate research before they could
-  drive the same mascot states.
+- This app is Claude Code only by design now — the terminal-screen-scraping
+  approach that used to also (best-effort) support Codex/Cursor/Antigravity
+  has been removed in favor of Claude Code's own hook system, which those
+  other CLIs don't expose an equivalent of. See `server.rs`'s
+  `resolve_decision`/`handle_decide_request` and this file's design-decisions
+  section above.

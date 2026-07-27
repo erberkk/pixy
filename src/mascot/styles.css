@@ -31,7 +31,9 @@ body {
    positions per item — not a generic layout that grows with more items. */
 #quick-menu {
   position: absolute;
-  top: 54px;
+  /* 8px window margin-top + 66px true-idle circle height (the tallest the
+     pill gets while state-idle) + 4px gap. */
+  top: 78px;
   left: 50%;
   width: 0;
   height: 0;
@@ -100,73 +102,119 @@ body {
   height: 16px;
 }
 
+/* Base size/shape IS the idle pill — every other state overrides
+   width/height/border-radius explicitly below (waiting_permission,
+   github_merge, github_digest, agent_permission), same pattern as before.
+   Grid, not flex: EVERY state (ambient pill, permission card, GitHub
+   notices, digest) shares the same "icon pinned on the left, content to
+   its right" layout now, instead of the icon jumping between a centered
+   row, a hidden state, and a small strip above the content depending on
+   which body-state currently owns the box — one consistent anchor point
+   regardless of how wide/tall the box currently is. Two columns: 1 is the
+   icon (.pip-row — by default spans the FULL width too, since for the
+   plain ambient pill .pip-row already contains the title+indicator
+   internally and .notice is hidden, so there's no separate column-2
+   content competing for space; card/notice states below narrow it back to
+   column 1 only and give .notice column 2). Flat solid background, no
+   accent glow — the gradient/scanline texture and colored box-shadow glow
+   from the original pip-pixel design read as visual noise on this widget,
+   not a nice effect. Note: NO image-rendering:pixelated here — that
+   belongs only on .pip-canvas (see pip.css). */
 #mascot {
+  position: relative;
   margin-top: 8px;
-  width: 170px;
-  height: 42px;
-  background: #000;
-  border-radius: 21px;
-  border: 2px solid transparent;
-  display: flex;
-  flex-direction: column;
+  width: 210px;
+  height: 46px;
+  background: #0b0d14;
+  border-radius: 23px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  display: grid;
+  grid-template-columns: auto 1fr;
   align-items: center;
-  justify-content: center;
-  gap: 8px;
+  column-gap: 8px;
   overflow: hidden;
-  image-rendering: pixelated;
   transition: width 0.3s ease, height 0.3s ease, border-radius 0.3s ease,
     border-color 0.25s ease, filter 0.15s ease;
-  padding: 6px 14px;
+  padding: 6px 14px 6px 6px;
+  box-shadow: 0 2px 6px rgba(6, 8, 16, 0.4), 0 10px 22px -10px rgba(6, 8, 16, 0.65);
+}
+
+.pip-row {
+  grid-column: 1 / -1;
+  grid-row: 1;
+}
+
+/* Card/notice states: the icon shrinks back to column 1 only (its
+   title/indicator are hidden internally — see the .pip-text/.pip-ind rules
+   below), vertically centered against the box's current height (whatever
+   it happens to be right now) rather than pinned to top or bottom; .notice
+   — and digest's Close button — take column 2. */
+.state-waiting_permission .pip-row,
+.state-waiting_input .pip-row,
+.state-github_merge .pip-row,
+.state-github_digest .pip-row,
+.state-agent_permission .pip-row {
+  grid-column: 1;
+  grid-row: 1 / -1;
+  align-self: center;
+}
+
+.state-waiting_permission .notice,
+.state-waiting_input .notice,
+.state-github_merge .notice,
+.state-github_digest .notice,
+.state-agent_permission .notice,
+.digest-close-btn {
+  grid-column: 2;
+}
+
+.state-waiting_permission .pip-ind,
+.state-waiting_input .pip-ind,
+.state-github_merge .pip-ind,
+.state-github_digest .pip-ind,
+.state-agent_permission .pip-ind,
+.state-waiting_permission .pip-text,
+.state-waiting_input .pip-text,
+.state-github_merge .pip-text,
+.state-github_digest .pip-text,
+.state-agent_permission .pip-text {
+  display: none;
+}
+
+/* github_digest is the one state with TWO stacked content rows (the
+   scrollable list, then the pinned Close button below it) — everything
+   else only ever has one. */
+.state-github_digest #mascot {
+  grid-template-rows: 1fr auto;
+}
+
+.state-github_digest .notice {
+  grid-row: 1;
+}
+
+.state-github_digest .digest-close-btn {
+  grid-row: 2;
 }
 
 /* Dynamic-Island-style subtle hover feedback while idle. Uses filter/border,
    not box-shadow — a shadow's blur gets hard-clipped at the window's exact
-   bounds (no margin exists for it to fade into), which reads as a visible
-   rectangle rather than a soft glow. */
+   bounds (no margin exists for it to fade into), which reads as a soft glow. */
 .state-idle #mascot:hover {
-  filter: brightness(1.35);
+  filter: brightness(1.15);
 }
 
-.face {
+/* True idle (nothing going on, no text to show) is the one deliberate
+   exception to the universal grid: the mascot alone in a snug circle,
+   sized up since there's no content competing for space. Falls back to
+   flex for this one case since a grid with unused 1fr track doesn't center
+   a single lone item the way flex's justify-content does. */
+.state-idle #mascot[data-pip-state="idle"] {
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-}
-
-.eyes {
-  display: flex;
-  gap: 12px;
-}
-
-.eye {
-  width: 9px;
-  height: 9px;
-  background: #fff;
-  transition: all 0.15s ease;
-}
-
-.mouth {
-  width: 26px;
-  height: 3px;
-  background: #fff;
-  transition: all 0.2s ease;
-}
-
-/* idle: calm pill, occasional slow blink */
-.state-idle #mascot {
-  animation: blink 4.5s infinite;
-}
-
-@keyframes blink {
-  0%,
-  92%,
-  100% {
-    /* eyes open */
-  }
-  95% {
-    filter: brightness(0.4);
-  }
+  width: 66px;
+  height: 66px;
+  border-radius: 33px;
+  justify-content: center;
+  padding: 0;
 }
 
 /* waiting: Claude needs your attention — expanded panel with a fixed notice,
@@ -180,11 +228,6 @@ body {
   width: 280px;
   height: 90px;
   border-radius: 26px;
-}
-
-.state-waiting_permission .face,
-.state-waiting_input .face {
-  display: none;
 }
 
 .notice {
@@ -224,14 +267,19 @@ body {
    from github.rs/issue_watcher.rs (see showTransientNotice in main.js),
    not through the mascot-state hook state machine. Slightly taller than a
    single line needs, to fit the issue notices' extra repo-name line. */
+/* Content-sized like the agent-permission card below (fit-content + min/max,
+   transition on border-color/filter only — fit-content can't be smoothly
+   interpolated) instead of a fixed 300x100 box, so a long issue title or
+   repo name grows the pill instead of getting clipped. */
 .state-github_merge #mascot {
-  width: 300px;
-  height: 100px;
+  width: fit-content;
+  min-width: 260px;
+  max-width: 560px;
+  height: fit-content;
+  min-height: 92px;
+  max-height: 260px;
   border-radius: 26px;
-}
-
-.state-github_merge .face {
-  display: none;
+  transition: border-color 0.25s ease, filter 0.15s ease;
 }
 
 .state-github_merge .notice {
@@ -242,15 +290,23 @@ body {
   font-weight: 600;
   text-align: center;
   cursor: pointer;
+  overflow-y: auto;
+  /* `max-height: 100%` doesn't actually work here: percentage heights
+     resolve against the containing block's height, but #mascot's height
+     is `fit-content` (indefinite), so per spec this % is ignored entirely
+     (same bug as .state-agent_permission .notice above — see its comment
+     for the full explanation). An explicit px value based on #mascot's own
+     max-height (260px) minus its padding is the actual working fix. */
+  max-height: 220px;
 }
 
 .merge-notice {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
   gap: 8px;
   width: 100%;
-  padding: 0 14px;
+  padding: 4px 14px;
 }
 
 .merge-notice svg {
@@ -277,18 +333,15 @@ body {
   color: #8b949e;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 220px;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .issue-notice-action {
   font-size: 13px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 220px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  max-width: 480px;
 }
 
 /* github-digest: a longer itemized daily summary — the pill grows to a
@@ -297,30 +350,38 @@ body {
    button below the list can leave this state (see main.js's digestLocked
    guard) — nothing else (hook events, merge notices) can override it while
    it's showing. */
+/* height: fit-content (bounded) instead of a fixed 460px — a short digest
+   (few attention items) no longer leaves a half-empty card, and a long one
+   still scrolls internally via .notice's own overflow-y rather than pushing
+   past the window. */
 .state-github_digest #mascot {
   width: 520px;
-  height: 460px;
+  height: fit-content;
+  min-height: 160px;
+  max-height: 560px;
   border-radius: 22px;
   padding: 22px 24px;
   background: #0d0d0d;
   border: 1px solid #262626;
-}
-
-.state-github_digest .face {
-  display: none;
+  transition: border-color 0.25s ease, filter 0.15s ease;
 }
 
 .state-github_digest .notice {
   display: flex;
   flex-direction: column;
-  flex: 1 1 auto;
-  min-height: 0;
   gap: 14px;
   font-family: -apple-system, "Segoe UI", sans-serif;
   text-align: left;
   overflow-y: auto;
   width: 100%;
   padding-right: 4px;
+  /* Explicit px cap, not flex:1 1 auto/min-height:0 (those do nothing on a
+     grid item — #mascot is `display: grid`, not flex) and not a `1fr` grid
+     row either (1fr needs a definite container height to resolve against,
+     and #mascot's height here is fit-content/indefinite). Same fix as
+     .state-agent_permission .notice above, sized for this state's own
+     560px #mascot max-height minus padding and the Close button row. */
+  max-height: 460px;
 }
 
 .state-github_digest .notice::-webkit-scrollbar {
@@ -491,20 +552,27 @@ body {
   transition: border-color 0.25s ease, filter 0.15s ease;
 }
 
-.state-agent_permission .face {
-  display: none;
-}
-
 /* Container for one-or-more .permission-card entries — each concurrently
-   pending agent CLI (Claude in one terminal slot, Antigravity in another,
-   etc.) gets its own card stacked vertically here rather than the UI
-   showing/queuing them one at a time. Scrolls internally if the stack
-   outgrows #mascot's max-height instead of growing the window forever. */
+   pending Claude Code session (one per pooled terminal slot) gets its own
+   card stacked vertically here rather than the UI showing/queuing them one
+   at a time. Scrolls internally if the stack (or even a single long command/
+   diff) outgrows this budget instead of growing the window forever.
+   #mascot is a GRID container here (see .pip-row rules above), not flex —
+   `flex: 1 1 auto` on a grid item does nothing, and a grid item's intrinsic
+   (fit-content) sizing pass largely ignores its own `overflow-y: auto` when
+   computing the PARENT's fit-content height, so #mascot was growing to fit
+   the full unclipped content first and only hard-clipping it afterwards via
+   `overflow: hidden` — past the clip, there was no still-visible scrollbar
+   to reach, which is exactly the "can't scroll down to Approve/Deny" bug
+   this replaces. An explicit px max-height sidesteps all of that: it's a
+   hard leaf-level constraint the browser applies before any of #mascot's
+   own sizing math, so the scrollbar always has real, reachable room.
+   620px max-height on #mascot minus ~18px vertical padding minus ~50px for
+   the header row above whichever card is scrolled leaves this budget. */
 .state-agent_permission .notice {
   display: flex;
   flex-direction: column;
-  flex: 1 1 auto;
-  min-height: 0;
+  max-height: 560px;
   gap: 14px;
   overflow-y: auto;
   font-family: -apple-system, "Segoe UI", sans-serif;
@@ -556,6 +624,22 @@ body {
   color: #aaa;
   font-size: 12px;
   font-weight: 500;
+  flex: 1 1 auto;
+}
+
+.permission-dismiss-btn {
+  flex: 0 0 auto;
+  background: transparent;
+  border: none;
+  color: #666;
+  font-size: 16px;
+  line-height: 1;
+  padding: 2px 4px;
+  cursor: pointer;
+}
+
+.permission-dismiss-btn:hover {
+  color: #e05c5c;
 }
 
 /* One colored pill per agent CLI — same idea as the reference screenshot's
@@ -577,25 +661,6 @@ body {
   color: #e29073;
 }
 
-.agent-badge--codex {
-  background: rgba(16, 163, 127, 0.16);
-  border-color: rgba(16, 163, 127, 0.4);
-  color: #3ecfa5;
-}
-
-.agent-badge--antigravity {
-  background: rgba(139, 92, 246, 0.16);
-  border-color: rgba(139, 92, 246, 0.4);
-  color: #a78bfa;
-}
-
-.agent-badge--cursor {
-  background: rgba(96, 165, 250, 0.16);
-  border-color: rgba(96, 165, 250, 0.4);
-  color: #7dabf8;
-}
-
-.agent-badge--cli,
 .agent-badge--idle {
   background: rgba(148, 163, 184, 0.14);
   border-color: rgba(148, 163, 184, 0.35);
@@ -626,9 +691,8 @@ body {
   border-radius: 7px;
 }
 
-/* First line only — the tool/action header (e.g. "Bash command", "Write",
-   "File access") gets its own badge-like styling so it reads as a label,
-   not just another line of body text. */
+/* Tool name (e.g. "Bash", "Edit") — its own badge-like styling so it reads
+   as a label, not just another line of body text. */
 .permission-tool {
   color: #e8b04b;
   font-size: 12px;
@@ -637,63 +701,44 @@ body {
   letter-spacing: 0.04em;
 }
 
-.permission-line {
+/* Bash's optional description / Task's subagent_type — a small dim caption
+   line above the actual command/code block. */
+.permission-tool-desc {
+  color: #999;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.permission-file-path {
+  color: #8b949e;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 11.5px;
+  padding: 0 4px 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Bash command / Write content / raw JSON fallback — real tool_input text
+   straight from the Claude Code hook, not a scraped-and-guessed preview. */
+.permission-code {
   color: #ddd;
   font-family: Consolas, "Courier New", monospace;
   font-size: 12.5px;
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
-  padding: 0 4px;
-  border-radius: 3px;
+  background: #161616;
+  border: 1px solid #232323;
+  border-radius: 10px;
+  padding: 10px 12px;
 }
 
-/* Edit/Write-tool previews from Claude/Antigravity are already unified-diff
-   text — coloring +/- lines like a real diff (instead of flat gray) makes
-   the actual code change legible at a glance, matching how every code
-   review tool already renders this. */
-
-/* Small file-path + stat-count row above a diff block — same idea as a real
-   diff viewer's file header, separating "which file" from the actual
-   line-by-line change content below it. */
-.diff-header {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
-  font-family: Consolas, "Courier New", monospace;
-  font-size: 11.5px;
-  color: #8b949e;
-  padding: 0 4px 6px;
-  margin-bottom: 4px;
-  border-bottom: 1px solid #232323;
-}
-
-.diff-header-path {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.diff-header-stats {
-  flex: 0 0 auto;
-  display: flex;
-  gap: 6px;
-  font-weight: 700;
-}
-
-.diff-header-stat-add {
-  color: #3fb950;
-}
-
-.diff-header-stat-remove {
-  color: #e05c5c;
-}
-
-/* One row per changed line — line number / +- marker / code laid out in
-   fixed columns (like any real code editor's diff gutter) with a full-row
-   tint per marker, instead of a flat stack of colored text. */
+/* One row per changed line — marker + code laid out in fixed columns with a
+   full-row tint per marker, instead of a flat stack of colored text.
+   old_string/new_string are exact from the hook, so this is a plain
+   remove-then-add rendering rather than a real line-level diff — still far
+   more accurate than the previous screen-scraped preview. */
 .diff-row {
   display: flex;
   align-items: flex-start;
@@ -711,13 +756,6 @@ body {
 
 .diff-row--remove {
   background: rgba(224, 92, 92, 0.12);
-}
-
-.diff-lineno {
-  flex: 0 0 24px;
-  text-align: right;
-  color: #666;
-  user-select: none;
 }
 
 .diff-marker {
@@ -746,6 +784,80 @@ body {
   flex: 0 0 auto;
   gap: 10px;
   justify-content: center;
+}
+
+/* AskUserQuestion rendering — Claude Code's own multi-choice prompt, shown
+   as tappable chips instead of the Bash/Write/etc Approve/Deny card (see
+   main.js's buildQuestionUI). Answers travel back through the same
+   PermissionRequest hook response as approve/deny, just with updatedInput
+   set instead of left empty. */
+/* Centered as a unit, not left-aligned — .notice sets text-align:left for
+   the Bash/Write/etc tool cards (command/diff text reads better flush left),
+   but AskUserQuestion has no code/path content to align against, so
+   left-aligned text next to centered Submit/Show-all-agents buttons below
+   it just reads as accidentally shifted left. */
+.question-block {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  text-align: center;
+}
+
+.question-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.question-header {
+  color: #888;
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.question-text {
+  color: #ddd;
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.question-options {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+}
+
+.question-chip {
+  background: #1c1c1c;
+  border: 1px solid #3a3a3a;
+  color: #ccc;
+  border-radius: 999px;
+  padding: 5px 13px;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.question-chip:hover {
+  border-color: #666;
+  color: #fff;
+}
+
+.question-chip.selected {
+  background: rgba(92, 158, 191, 0.18);
+  border-color: #5c9ebf;
+  color: #7fc3e8;
+}
+
+.question-submit {
+  align-self: center;
+  margin-top: 2px;
 }
 
 /* "Show all agents" — collapsed by default, sits below whatever permission

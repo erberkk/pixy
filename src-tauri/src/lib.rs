@@ -1,3 +1,4 @@
+mod ci_watcher;
 mod clickthrough;
 mod config;
 mod github;
@@ -6,6 +7,7 @@ mod llm;
 mod media;
 mod notes;
 mod server;
+mod system;
 mod terminal;
 mod tray;
 mod windows;
@@ -18,6 +20,7 @@ use github::{
     get_github_config, get_github_report, open_in_browser, save_github_config,
     test_github_connection,
 };
+use system::{get_idle_seconds, get_power_status};
 use llm::{get_llm_config, save_llm_config, test_llm_connection};
 use media::{
     list_audio_sessions, set_session_muted, set_session_volume, spotify_get_state, spotify_next,
@@ -26,10 +29,9 @@ use media::{
     system_speaker_set_volume,
 };
 use notes::{choose_notes_dir, delete_note, get_notes_dir, list_notes, open_external_file, open_path, save_note};
-use server::start_event_server;
+use server::{dismiss_permission, respond_permission, start_event_server};
 use terminal::{
-    approve_permission, deny_permission, list_agent_sessions, report_terminal_text, resize_pty,
-    start_terminal_session, write_to_pty,
+    list_agent_sessions, report_terminal_text, resize_pty, start_terminal_session, write_to_pty,
 };
 use windows::{
     focus_terminal_session, hide_mascot, hide_notepad, hide_settings, hide_terminal, open_notepad,
@@ -83,8 +85,8 @@ pub fn run() {
             write_to_pty,
             report_terminal_text,
             resize_pty,
-            approve_permission,
-            deny_permission,
+            respond_permission,
+            dismiss_permission,
             list_agent_sessions,
             focus_terminal_session,
             spotify_get_state,
@@ -99,7 +101,9 @@ pub fn run() {
             system_mic_set_muted,
             list_audio_sessions,
             set_session_volume,
-            set_session_muted
+            set_session_muted,
+            get_power_status,
+            get_idle_seconds
         ])
         .setup(|app| {
             let window = app
@@ -140,6 +144,7 @@ pub fn run() {
             github::start_merge_watcher(app.handle().clone());
             github::start_daily_digest_watcher(app.handle().clone());
             issue_watcher::start_issue_watcher(app.handle().clone());
+            ci_watcher::start_ci_watcher(app.handle().clone());
 
             media::start_spotify_watcher(app.handle().clone());
 

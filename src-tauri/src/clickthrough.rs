@@ -63,7 +63,15 @@ pub fn start_click_through_watcher(window: tauri::WebviewWindow) {
                     currently_ignoring = Some(should_ignore);
                 }
             }
-            std::thread::sleep(Duration::from_millis(40));
+            // 40ms used to leave a real race: if the cursor lands on the pill
+            // and the mouse button goes down before the NEXT poll tick, the
+            // window is still in "ignore cursor events" mode from the prior
+            // tick (cursor was outside then) and the click passes straight
+            // through — reproduced directly by teleporting the cursor onto
+            // the pill and clicking with no settle time. GetCursorPos +
+            // this comparison is cheap enough to poll far more often and
+            // shrink that window to something no real click can win.
+            std::thread::sleep(Duration::from_millis(8));
         }
     });
 }

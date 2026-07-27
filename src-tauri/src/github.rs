@@ -271,9 +271,65 @@ fn poll_for_merges(app: &tauri::AppHandle) {
     write_pr_cache(app, &cache);
 }
 
+fn review_cache_path(app: &tauri::AppHandle) -> PathBuf {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .expect("app data dir must be resolvable");
+    let _ = std::fs::create_dir_all(&dir);
+    dir.join("github-review-request-cache.json")
+}
+
+fn read_review_cache(app: &tauri::AppHandle) -> HashMap<String, bool> {
+    std::fs::read_to_string(review_cache_path(app))
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+fn write_review_cache(app: &tauri::AppHandle, cache: &HashMap<String, bool>) {
+    if let Ok(json) = serde_json::to_string_pretty(cache) {
+        let _ = std::fs::write(review_cache_path(app), json);
+    }
+}
+
+// Notifies once per PR the moment it starts asking for the user's review —
+// cache-diffed the same way as merges (false->true edge only), not every
+// poll it's still pending, so this doesn't re-notify every 5 minutes for as
+// long as the request sits unanswered.
+fn poll_for_review_requests(app: &tauri::AppHandle) {
+    let cfg = read_config(app);
+    let Some(token) = cfg.github_token.filter(|t| !t.trim().is_empty()) else {
+        return;
+    };
+    let prs = match search_issues(&token, "is:pr is:open review-requested:@me") {
+        Ok(p) => p,
+        Err(e) => {
+            append_debug_log(app, &format!("review-watcher: failed fetching review requests — {e}"));
+            return;
+        }
+    };
+
+    let cache = read_review_cache(app);
+    let mut still_pending: HashMap<String, bool> = HashMap::new();
+    for pr in &prs {
+        let key = format!("{}#{}", pr.repo, pr.number);
+        if !cache.get(&key).copied().unwrap_or(false) {
+            append_debug_log(app, &format!("review-watcher: {key} — review requested, notifying"));
+            let _ = app.emit(
+                "github-review-requested",
+                json!({ "title": pr.title, "repo": pr.repo, "number": pr.number, "url": pr.url }),
+            );
+        }
+        still_pending.insert(key, true);
+    }
+    write_review_cache(app, &still_pending);
+}
+
 pub fn start_merge_watcher(app: tauri::AppHandle) {
     std::thread::spawn(move || loop {
         poll_for_merges(&app);
+        poll_for_review_requests(&app);
         std::thread::sleep(Duration::from_secs(300));
     });
 }
@@ -498,7 +554,7 @@ fn build_final_digest(report: &GithubReport) -> String {
     // this whole digest that actually benefits from a model's judgment.
     for item in &report.issues {
         if let Some(note) = &item.action_note {
-            attention.push(format!("{} #{} — {}", item.repo, item.number, truncate_str(note, 200)));
+            attention.push(format!("{} #{} — {}", item.repo, item.number, truncate_str(note, 400)));
         }
     }
 
@@ -506,7 +562,7 @@ fn build_final_digest(report: &GithubReport) -> String {
     for item in &report.pull_requests {
         let reason = match item.review_state.as_deref() {
             Some("CHANGES_REQUESTED") => match &item.review_body {
-                Some(body) => format!("changes requested — \"{}\"", truncate_str(body, 150)),
+                Some(body) => format!("changes requested — \"{}\"", truncate_str(body, 400)),
                 None => "changes requested, no comment given".to_string(),
             },
             Some("APPROVED") => "approved, ready to merge".to_string(),

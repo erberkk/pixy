@@ -3,21 +3,37 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="pip.css" />
     <link rel="stylesheet" href="spotify.css" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Mascot</title>
     <script type="module" src="./main.js" defer></script>
     <script type="module" src="./spotify.js" defer></script>
+    <script type="module" src="./pipstate.js" defer></script>
+    <script type="module" src="./signals.js" defer></script>
   </head>
 
   <body class="state-idle">
-    <div id="mascot" data-tauri-drag-region="deep">
-      <div class="face">
-        <div class="eyes">
-          <div class="eye" id="eye-left"></div>
-          <div class="eye" id="eye-right"></div>
+    <div id="mascot">
+      <div class="pip-row" id="pip-row">
+        <div class="pip-slot">
+          <canvas class="pip-canvas" id="pip-canvas" width="24" height="24" aria-hidden="true"></canvas>
         </div>
-        <div class="mouth" id="mouth"></div>
+        <div class="pip-text">
+          <span class="pip-title" id="pip-title">Idle</span>
+          <span class="pip-sub" id="pip-sub">standing by</span>
+        </div>
+        <div class="pip-ind" id="pip-ind">
+          <div class="i-dots"><i></i><i></i><i></i></div>
+          <div class="i-ring"></div>
+          <div class="i-caret"></div>
+          <div class="i-eq"><i></i><i></i><i></i><i></i></div>
+          <div class="i-moon"></div>
+          <div class="i-check">&check;</div>
+          <div class="i-bang">!</div>
+          <div class="i-rec"><i></i><b>REC</b></div>
+          <div class="i-bat"><i></i></div>
+        </div>
       </div>
 
       <div class="notice" id="notice"></div>
