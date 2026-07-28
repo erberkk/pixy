@@ -1,0 +1,265 @@
+/* GitHub notices (see github-notice.js): merged-PR toast, issue-thread update
+   and the pinned daily digest card. */
+/* github-merge: a short "your PR merged" notice, clickable to open the PR.
+   Also reused as-is by showGithubIssueNotice (main.js) for issue
+   assigned/comment/closed/reopened notices — same box treatment, just a
+   different icon/text per event. Same class since it's pushed directly
+   from github/api.rs/issue_watcher.rs (see showTransientNotice in main.js),
+   not through the mascot-state hook state machine. Slightly taller than a
+   single line needs, to fit the issue notices' extra repo-name line. */
+/* Content-sized like the agent-permission card below (fit-content + min/max,
+   transition on border-color/filter only — fit-content can't be smoothly
+   interpolated) instead of a fixed 300x100 box, so a long issue title or
+   repo name grows the pill instead of getting clipped. */
+.state-github_merge #mascot {
+  width: fit-content;
+  min-width: 260px;
+  max-width: 560px;
+  height: fit-content;
+  min-height: 92px;
+  max-height: 260px;
+  border-radius: 26px;
+  transition: border-color 0.25s ease, filter 0.15s ease;
+}
+
+.state-github_merge .notice {
+  display: flex;
+  color: #fff;
+  font-family: -apple-system, "Segoe UI", sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  text-align: center;
+  cursor: pointer;
+  overflow-y: auto;
+  /* `max-height: 100%` doesn't actually work here: percentage heights
+     resolve against the containing block's height, but #mascot's height
+     is `fit-content` (indefinite), so per spec this % is ignored entirely
+     (same bug as .state-agent_permission .notice above — see its comment
+     for the full explanation). An explicit px value based on #mascot's own
+     max-height (260px) minus its padding is the actual working fix. */
+  max-height: 220px;
+}
+
+.merge-notice {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 14px;
+}
+
+.merge-notice svg {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  color: #a371f7;
+}
+
+/* Issue notices only (see showGithubIssueNotice) — the merge notice's
+   single <span> doesn't use this, it's just for the two-line repo+action
+   text stack. */
+.issue-notice-text {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+}
+
+.issue-notice-repo {
+  font-size: 10px;
+  font-weight: 700;
+  color: #8b949e;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.issue-notice-action {
+  font-size: 13px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  max-width: 480px;
+}
+
+/* github-digest: a longer itemized daily summary — the pill grows to a
+   proper readable card instead of trying to cram a list into a one-line
+   notice. Pinned open: no auto-dismiss timer, only the explicit Close
+   button below the list can leave this state (see main.js's digestLocked
+   guard) — nothing else (hook events, merge notices) can override it while
+   it's showing. */
+/* height: fit-content (bounded) instead of a fixed 460px — a short digest
+   (few attention items) no longer leaves a half-empty card, and a long one
+   still scrolls internally via .notice's own overflow-y rather than pushing
+   past the window. */
+.state-github_digest #mascot {
+  width: 520px;
+  height: fit-content;
+  min-height: 160px;
+  max-height: 560px;
+  border-radius: 22px;
+  padding: 22px 24px;
+  background: #0d0d0d;
+  border: 1px solid #262626;
+  transition: border-color 0.25s ease, filter 0.15s ease;
+}
+
+.state-github_digest .notice {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  font-family: -apple-system, "Segoe UI", sans-serif;
+  text-align: left;
+  overflow-y: auto;
+  width: 100%;
+  padding-right: 4px;
+  /* Explicit px cap, not flex:1 1 auto/min-height:0 (those do nothing on a
+     grid item — #mascot is `display: grid`, not flex) and not a `1fr` grid
+     row either (1fr needs a definite container height to resolve against,
+     and #mascot's height here is fit-content/indefinite). Same fix as
+     .state-agent_permission .notice above, sized for this state's own
+     560px #mascot max-height minus padding and the Close button row. */
+  max-height: 460px;
+}
+
+.state-github_digest .notice::-webkit-scrollbar {
+  width: 7px;
+}
+
+.state-github_digest .notice::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.state-github_digest .notice::-webkit-scrollbar-thumb {
+  background: #3a3a3a;
+  border-radius: 7px;
+}
+
+.digest-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+  padding-bottom: 14px;
+  border-bottom: 1px solid #262626;
+  color: #eee;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.digest-header svg {
+  width: 20px;
+  height: 20px;
+  color: #e8b04b;
+}
+
+.digest-workload {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-self: flex-start;
+  color: #bbb;
+  font-size: 12px;
+  font-weight: 600;
+  background: #1c1c1c;
+  border: 1px solid #2e2e2e;
+  border-radius: 20px;
+  padding: 5px 14px;
+}
+
+.digest-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.digest-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  color: #ddd;
+  font-size: 13.5px;
+  line-height: 1.55;
+  background: #161616;
+  border: 1px solid #232323;
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.digest-dot {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  margin-top: 7px;
+  border-radius: 50%;
+  background: #555;
+}
+
+/* Category colors: red = someone's blocking you (changes requested), amber
+   = a real action item from issue-thread analysis, blue = waiting on a
+   review, green = approved/ready, gray = just old. Carries meaning at a
+   glance instead of every row looking identical. */
+.digest-row--danger {
+  color: #f5a3a3;
+}
+.digest-row--danger .digest-dot {
+  background: #e05c5c;
+  box-shadow: 0 0 0 3px rgba(224, 92, 92, 0.2);
+}
+
+.digest-row--action {
+  color: #f0c674;
+}
+.digest-row--action .digest-dot {
+  background: #e8b04b;
+  box-shadow: 0 0 0 3px rgba(232, 176, 75, 0.2);
+}
+
+.digest-row--info {
+  color: #8fb8e8;
+}
+.digest-row--info .digest-dot {
+  background: #5c8fd6;
+  box-shadow: 0 0 0 3px rgba(92, 143, 214, 0.2);
+}
+
+.digest-row--ok {
+  color: #8fd6a8;
+}
+.digest-row--ok .digest-dot {
+  background: #5cbf7e;
+  box-shadow: 0 0 0 3px rgba(92, 191, 126, 0.2);
+}
+
+.digest-row--stale {
+  color: #999;
+}
+.digest-row--stale .digest-dot {
+  background: #666;
+}
+
+.digest-close-btn {
+  display: none;
+}
+
+.state-github_digest .digest-close-btn {
+  display: block;
+  flex: 0 0 auto;
+  background: #262626;
+  border: 1px solid #444;
+  color: #ddd;
+  border-radius: 8px;
+  padding: 5px 16px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.state-github_digest .digest-close-btn:hover {
+  background: #333;
+  border-color: #e8b04b;
+  color: #e8b04b;
+}
+

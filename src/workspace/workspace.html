@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- Order matters: these four were split out of one stylesheet, so keeping
+         the link order preserves the original cascade. -->
+    <link rel="stylesheet" href="workspace.css" />
+    <link rel="stylesheet" href="notes/notes.css" />
+    <link rel="stylesheet" href="memory/memory.css" />
+    <link rel="stylesheet" href="chat/chat.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Workspace</title>
+    <script type="module" src="./workspace.js" defer></script>
+  </head>
+
+  <body>
+    <div id="titlebar" data-tauri-drag-region>
+      <span id="titlebar-title" data-tauri-drag-region>Workspace</span>
+      <div id="titlebar-controls">
+        <button class="titlebar-btn" id="titlebar-minimize" title="Minimize">
+          <svg viewBox="0 0 10 10"><path d="M0 5h10" stroke="currentColor" stroke-width="1"/></svg>
+        </button>
+        <button class="titlebar-btn" id="titlebar-maximize" title="Maximize">
+          <svg viewBox="0 0 10 10"><rect x="0.5" y="0.5" width="9" height="9" fill="none" stroke="currentColor" stroke-width="1"/></svg>
+        </button>
+        <button class="titlebar-btn" id="titlebar-close" title="Close">
+          <svg viewBox="0 0 10 10"><path d="M0 0l10 10M10 0L0 10" stroke="currentColor" stroke-width="1"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <div class="drop-overlay" id="dropOverlay">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14"/></svg>
+      <p>Drop to open as a note</p>
+    </div>
+
+    <div class="app" id="app">
+      <aside class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+          <div class="mode-tabs" id="modeTabs">
+            <button class="mode-tab active" data-mode="chat">Chat</button>
+            <button class="mode-tab" data-mode="notes">Notes</button>
+            <button class="mode-tab" data-mode="memory">Memory</button>
+          </div>
+          <button class="icon-btn" id="collapseBtn" title="Toggle sidebar">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
+          </button>
+        </div>
+
+        <div id="notesSidebarExtras">
+          <div class="folder-row" id="folderRow" title="">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/></svg>
+            <span id="folderPath">…</span>
+            <button class="icon-btn" id="changeFolderBtn" title="Change notes folder">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9M16.5 3.5a2.12 2.12 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+            </button>
+            <button class="icon-btn" id="openFileBtn" title="Open an existing .txt/.md file from anywhere">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12V7a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2h6M16 16l3 3 3-3M19 19v-7"/></svg>
+            </button>
+          </div>
+
+          <button class="new-note-btn" id="newNoteBtn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 5v14M5 12h14"/></svg>
+            New note
+          </button>
+        </div>
+
+        <div id="chatSidebarExtras" style="display:none;">
+          <button class="new-note-btn" id="newChatBtn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 5v14M5 12h14"/></svg>
+            New chat
+          </button>
+        </div>
+
+        <div class="search-wrap" id="searchWrap">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+          <input class="search-input" id="searchInput" placeholder="Search notes… (Ctrl+K)" />
+        </div>
+
+        <div class="memory-filters" id="memoryFilters" style="display:none;"></div>
+
+        <div class="notes-list" id="notesList"></div>
+        <div class="memory-list" id="memoryList" style="display:none;"></div>
+        <div class="chat-list" id="chatList" style="display:none;"></div>
+
+        <div class="sidebar-footer">
+          <div class="sidebar-footer-row">
+            <span id="notesCount">0 notes</span>
+            <div class="tools" id="notesTools">
+              <button class="icon-btn" id="fontToggle" title="Toggle font (mono/sans)">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7V4h16v3M9 20h6M12 4v16"/></svg>
+              </button>
+              <button class="icon-btn" id="linesToggle" title="Toggle line numbers">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
+              </button>
+              <button class="icon-btn" id="trashToggle" title="Trash">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6h14z"/><path d="M10 11v6M14 11v6"/></svg>
+              </button>
+            </div>
+          </div>
+          <div class="sidebar-footer-row" id="formatRow">
+            <span>new notes save as</span>
+            <div class="format-toggle" id="formatToggle">
+              <button class="format-toggle-opt" data-ext="txt">txt</button>
+              <button class="format-toggle-opt" data-ext="md">md</button>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      <!-- Lives outside both #notesMain/#memoryMain (a sibling of .sidebar
+           inside .app) so it's reachable regardless of which mode is active
+           when the sidebar gets collapsed — it used to sit inside #notesMain's
+           own topbar only, which meant collapsing the sidebar while in
+           Memory mode left no visible way to bring it back at all. -->
+      <button class="icon-btn" id="openSidebarBtn" title="Show sidebar" style="display:none;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
+      </button>
+
+      <main class="main" id="notesMain">
+        <div class="topbar">
+          <input class="title-input" id="titleInput" placeholder="Untitled note" />
+          <button class="ext-badge" id="extBadge" title="Click to convert this note between .txt and .md">.txt</button>
+          <div class="toolbar">
+            <button class="icon-btn" id="pinBtn" title="Pin note">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 17v5M9 10.76a2 2 0 01-1.11 1.79l-1.78.9A2 2 0 005 15.24V16a1 1 0 001 1h12a1 1 0 001-1v-.76a2 2 0 00-1.11-1.79l-1.78-.9A2 2 0 0115 10.76V7a1 1 0 011-1 1 1 0 001-1V4a1 1 0 00-1-1H8a1 1 0 00-1 1v1a1 1 0 001 1 1 1 0 011 1z"/></svg>
+            </button>
+            <div class="divider"></div>
+            <button class="icon-btn" id="previewBtn" title="Toggle Markdown preview (Ctrl+E) — write **bold**, # headers, - lists, then click here to render it">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>
+              <span class="icon-btn-label">MD</span>
+            </button>
+            <button class="icon-btn" id="focusBtn" title="Focus mode (Ctrl+. or Esc to exit)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3M3 16v3a2 2 0 002 2h3m11-5v3a2 2 0 01-2 2h-3"/></svg>
+            </button>
+            <button class="icon-btn" id="findBtn" title="Find & replace (Ctrl+F)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+            </button>
+            <div class="divider"></div>
+            <button class="icon-btn" id="deleteBtn" title="Move to trash">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6h14z"/><path d="M10 11v6M14 11v6"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- Exit-focus button lives OUTSIDE .toolbar so it stays visible/clickable
+             while focus mode hides the rest of the toolbar (that was the bug: the
+             only way out used to be a keyboard shortcut). -->
+        <button class="exit-focus-btn" id="exitFocusBtn" title="Exit focus mode (Esc)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6L6 18"/></svg>
+          Exit focus
+        </button>
+
+        <div class="status-row">
+          <span class="stat"><b id="wordCount">0</b> words</span>
+          <span class="stat"><b id="charCount">0</b> chars</span>
+          <span class="stat"><b id="lineCount">1</b> lines</span>
+          <span class="stat"><b id="readTime">0 min</b> read</span>
+          <span class="stat">Ln <b id="curLine">1</b>, Col <b id="curCol">1</b></span>
+          <span class="stat selection" id="selectionStat" style="display:none;">Selected: <b id="selWords">0</b>w / <b id="selChars">0</b>ch</span>
+          <div class="save-indicator">
+            <span class="save-dot" id="saveDot" title="Saved"></span>
+          </div>
+        </div>
+
+        <div class="editor-wrap" id="editorWrap">
+          <div class="gutter" id="gutter">1</div>
+          <textarea class="editor" id="editor" placeholder="Start typing… (supports **bold**, # headers, - lists, [[links]])" spellcheck="false"></textarea>
+          <div class="preview" id="preview"></div>
+
+          <div class="find-panel" id="findPanel">
+            <div class="find-row">
+              <input id="findInput" placeholder="Find" />
+              <span class="find-count" id="findCount"></span>
+              <button class="mini-btn" id="findNextBtn">Next</button>
+            </div>
+            <div class="find-row">
+              <input id="replaceInput" placeholder="Replace with" />
+            </div>
+            <div class="find-actions">
+              <button class="mini-btn" id="replaceAllBtn">Replace all</button>
+              <button class="mini-btn" id="closeFindBtn">Close</button>
+            </div>
+          </div>
+
+          <div class="empty-state" id="emptyState" style="display:none;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 3v5h5M6 3h8l6 6v12H6z"/></svg>
+            <p>No note selected</p>
+            <p><span class="kbd">Ctrl</span> + <span class="kbd">N</span> to create one, <span class="kbd">Ctrl</span> + <span class="kbd">K</span> for commands</p>
+          </div>
+        </div>
+      </main>
+
+      <!-- Read-only viewer over Claude Code's own memory files — see
+           content/memory.rs. No create/edit/delete anywhere in here on purpose. -->
+      <main class="main memory-main" id="memoryMain" style="display:none;">
+        <div class="memory-toolbar">
+          <span class="memory-toolbar-title" id="memoryGraphTitle">Memory graph</span>
+          <span class="memory-toolbar-count" id="memoryGraphCount"></span>
+          <button class="icon-btn" id="memorySourcesBtn" title="Manage memory sources">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/><path d="M12 11v4M10 13h4"/></svg>
+          </button>
+          <button class="icon-btn" id="memoryZoomOutBtn" title="Zoom out">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3M8 11h6"/></svg>
+          </button>
+          <button class="icon-btn" id="memoryZoomInBtn" title="Zoom in">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3M11 8v6M8 11h6"/></svg>
+          </button>
+          <button class="icon-btn" id="memoryResetViewBtn" title="Reset view">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 1 3 6.7"/><path d="M3 17v-5h5"/></svg>
+          </button>
+        </div>
+
+        <div class="memory-graph-wrap" id="memoryGraphWrap">
+          <canvas id="memoryCanvas"></canvas>
+
+          <div class="memory-legend" id="memoryLegend"></div>
+          <div class="memory-tooltip" id="memoryTooltip"></div>
+
+          <!-- Which ~/.claude/projects-shaped directories the graph reads
+               from — the default root plus any the user's added (see
+               content/memory.rs's get_memory_roots/add_memory_root). Handles a
+               Claude Code config living somewhere other than the default
+               (CLAUDE_CONFIG_DIR set, a different OS profile, a synced
+               copy from another machine, ...). -->
+          <div class="memory-sources-panel" id="memorySourcesPanel">
+            <div class="memory-sources-head">
+              <h3>Memory sources</h3>
+              <button class="icon-btn" id="closeMemorySourcesBtn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6L6 18"/></svg>
+              </button>
+            </div>
+            <div class="memory-sources-list" id="memorySourcesList"></div>
+            <button class="new-note-btn memory-add-source-btn" id="addMemoryRootBtn">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 5v14M5 12h14"/></svg>
+              Add folder…
+            </button>
+          </div>
+
+          <div class="memory-empty" id="memoryEmpty" style="display:none;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/></svg>
+            <p>No memories yet</p>
+            <p>Claude will write memory files here as it learns things worth remembering across sessions.</p>
+          </div>
+
+          <div class="memory-detail" id="memoryDetail">
+            <div class="memory-detail-head">
+              <span class="memory-detail-type" id="memoryDetailType">note</span>
+              <div class="memory-detail-head-actions">
+                <button class="icon-btn" id="copyMemoryBodyBtn" title="Copy memory content">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+                </button>
+                <button class="icon-btn" id="closeMemoryDetailBtn">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6L6 18"/></svg>
+                </button>
+              </div>
+            </div>
+            <h3 class="memory-detail-name" id="memoryDetailName"></h3>
+            <p class="memory-detail-desc" id="memoryDetailDesc"></p>
+            <div class="memory-detail-meta" id="memoryDetailMeta"></div>
+            <div class="memory-detail-body" id="memoryDetailBody"></div>
+          </div>
+        </div>
+      </main>
+
+      <!-- Direct chat with a locally-configured LLM (see ai/llm.rs's streaming
+           send_chat_message + ai/chat.rs's per-chat persistence). Separate from
+           the notes' editor entirely — its own message list + composer. -->
+      <main class="main chat-main" id="chatMain" style="display:none;">
+        <div class="topbar chat-topbar">
+          <input class="title-input" id="chatTitleInput" placeholder="New chat" />
+          <select class="chat-model-select" id="chatModelSelect"></select>
+          <div class="toolbar">
+            <button class="icon-btn" id="chatInstructionsBtn" title="Custom instructions (applies to every chat)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l1.9 4.5L18 9l-4.1 1.5L12 15l-1.9-4.5L6 9l4.1-1.5L12 3z"/><path d="M19 15l.8 1.9L22 18l-2.2.9L19 21l-.8-2.1L16 18l2.2-1.1L19 15z"/></svg>
+            </button>
+            <button class="icon-btn" id="chatDeleteBtn" title="Delete this chat">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6h14z"/><path d="M10 11v6M14 11v6"/></svg>
+            </button>
+          </div>
+
+          <div class="chat-instructions-panel" id="chatInstructionsPanel">
+            <div class="chat-instructions-head">
+              <span>Custom instructions</span>
+              <button class="icon-btn" id="closeChatInstructionsBtn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6L6 18"/></svg>
+              </button>
+            </div>
+            <textarea id="chatInstructionsInput" placeholder="e.g. Reply tersely, no filler. Prefer code over prose. Assume I'm an experienced developer."></textarea>
+            <p class="chat-instructions-hint">Applies to every chat (not just this one) — sent once as a system message ahead of each conversation.</p>
+          </div>
+        </div>
+
+        <div class="chat-body" id="chatBody">
+          <div class="chat-messages" id="chatMessages"></div>
+
+          <div class="chat-empty" id="chatEmpty">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l2.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z"/></svg>
+            <p>No chat selected</p>
+            <p>Start a new conversation, or pick one from the sidebar.</p>
+          </div>
+        </div>
+
+        <div class="chat-attachment-chip" id="chatAttachmentChip" style="display:none;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>
+          <span class="chat-attachment-name" id="chatAttachmentName"></span>
+          <button type="button" class="chat-attachment-remove" id="chatAttachRemoveBtn" title="Remove attachment">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6L6 18"/></svg>
+          </button>
+        </div>
+
+        <form class="chat-composer" id="chatComposer">
+          <div class="chat-mascot chat-mascot-small" id="chatMascotRootSmall">
+            <canvas id="chatMascotCanvasSmall" class="pip-canvas" width="24" height="24"></canvas>
+          </div>
+          <button type="button" class="icon-btn" id="chatAttachBtn" title="Attach an image or text file">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>
+          </button>
+          <textarea class="chat-input" id="chatInput" placeholder="Message the assistant… (Enter to send, Shift+Enter for a new line)" rows="1"></textarea>
+          <button type="submit" class="chat-send-btn" id="chatSendBtn" title="Send">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+          </button>
+        </form>
+      </main>
+    </div>
+
+    <div class="overlay-backdrop" id="overlayBackdrop"></div>
+
+    <div class="cmdk" id="cmdk">
+      <input id="cmdkInput" placeholder="Type a command or search notes…" />
+      <div class="cmdk-list" id="cmdkList"></div>
+    </div>
+
+    <div class="trash-modal" id="trashModal">
+      <div class="trash-head">
+        <h3>Trash</h3>
+        <button class="icon-btn" id="closeTrashBtn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <div class="trash-list" id="trashList"></div>
+      <div class="trash-foot">
+        <button class="mini-btn danger" id="emptyTrashBtn">Empty trash</button>
+      </div>
+    </div>
+
+    <div class="toast" id="toast">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M20 6L9 17l-5-5"/></svg>
+      <span id="toastText">Exported</span>
+    </div>
+  </body>
+</html>

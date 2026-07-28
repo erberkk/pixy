@@ -25,7 +25,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tiny_http = "0.12"
 uuid = { version = "1", features = ["v4"] }
-reqwest = { version = "0.12", default-features = false, features = ["json", "blocking", "rustls-tls"] }
+# "multipart" is for the speech-to-text upload in ai/voice.rs — /audio/transcriptions
+# is a file upload, not a JSON body.
+reqwest = { version = "0.12", default-features = false, features = ["json", "blocking", "multipart", "rustls-tls"] }
 chrono = "0.4"
 portable-pty = "0.8"
 base64 = "0.22"

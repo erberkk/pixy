@@ -1,0 +1,161 @@
+/* The pill itself and its notice state machine (see notice.js): idle, waiting,
+   turn-done, plus the shared card/notice geometry every notice kind builds on. */
+
+/* Base size/shape IS the idle pill — every other state overrides
+   width/height/border-radius explicitly below (waiting_permission,
+   github_merge, github_digest, agent_permission), same pattern as before.
+   Grid, not flex: EVERY state (ambient pill, permission card, GitHub
+   notices, digest) shares the same "icon pinned on the left, content to
+   its right" layout now, instead of the icon jumping between a centered
+   row, a hidden state, and a small strip above the content depending on
+   which body-state currently owns the box — one consistent anchor point
+   regardless of how wide/tall the box currently is. Two columns: 1 is the
+   icon (.pip-row — by default spans the FULL width too, since for the
+   plain ambient pill .pip-row already contains the title+indicator
+   internally and .notice is hidden, so there's no separate column-2
+   content competing for space; card/notice states below narrow it back to
+   column 1 only and give .notice column 2). Flat solid background, no
+   accent glow — the gradient/scanline texture and colored box-shadow glow
+   from the original pip-pixel design read as visual noise on this widget,
+   not a nice effect. Note: NO image-rendering:pixelated here — that
+   belongs only on .pip-canvas (see pip.css). */
+#mascot {
+  position: relative;
+  margin-top: 8px;
+  width: 210px;
+  height: 46px;
+  background: #0b0d14;
+  border-radius: 23px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  column-gap: 8px;
+  overflow: hidden;
+  transition: width 0.3s ease, height 0.3s ease, border-radius 0.3s ease,
+    border-color 0.25s ease, filter 0.15s ease;
+  padding: 6px 14px 6px 6px;
+  box-shadow: 0 2px 6px rgba(6, 8, 16, 0.4), 0 10px 22px -10px rgba(6, 8, 16, 0.65);
+}
+
+.pip-row {
+  grid-column: 1 / -1;
+  grid-row: 1;
+}
+
+/* Card/notice states: the icon shrinks back to column 1 only (its
+   title/indicator are hidden internally — see the .pip-text/.pip-ind rules
+   below), vertically centered against the box's current height (whatever
+   it happens to be right now) rather than pinned to top or bottom; .notice
+   — and digest's Close button — take column 2. */
+.state-waiting_permission .pip-row,
+.state-waiting_input .pip-row,
+.state-github_merge .pip-row,
+.state-github_digest .pip-row,
+.state-agent_permission .pip-row {
+  grid-column: 1;
+  grid-row: 1 / -1;
+  align-self: center;
+}
+
+.state-waiting_permission .notice,
+.state-waiting_input .notice,
+.state-github_merge .notice,
+.state-github_digest .notice,
+.state-agent_permission .notice,
+.digest-close-btn {
+  grid-column: 2;
+}
+
+.state-waiting_permission .pip-ind,
+.state-waiting_input .pip-ind,
+.state-github_merge .pip-ind,
+.state-github_digest .pip-ind,
+.state-agent_permission .pip-ind,
+.state-waiting_permission .pip-text,
+.state-waiting_input .pip-text,
+.state-github_merge .pip-text,
+.state-github_digest .pip-text,
+.state-agent_permission .pip-text {
+  display: none;
+}
+
+/* github_digest is the one state with TWO stacked content rows (the
+   scrollable list, then the pinned Close button below it) — everything
+   else only ever has one. */
+.state-github_digest #mascot {
+  grid-template-rows: 1fr auto;
+}
+
+.state-github_digest .notice {
+  grid-row: 1;
+}
+
+.state-github_digest .digest-close-btn {
+  grid-row: 2;
+}
+
+/* Dynamic-Island-style subtle hover feedback while idle. Uses filter/border,
+   not box-shadow — a shadow's blur gets hard-clipped at the window's exact
+   bounds (no margin exists for it to fade into), which reads as a soft glow. */
+.state-idle #mascot:hover {
+  filter: brightness(1.15);
+}
+
+/* True idle (nothing going on, no text to show) is the one deliberate
+   exception to the universal grid: the mascot alone in a snug circle,
+   sized up since there's no content competing for space. Falls back to
+   flex for this one case since a grid with unused 1fr track doesn't center
+   a single lone item the way flex's justify-content does. */
+.state-idle #mascot[data-pip-state="idle"] {
+  display: flex;
+  width: 66px;
+  height: 66px;
+  border-radius: 33px;
+  justify-content: center;
+  padding: 0;
+}
+
+/* waiting: Claude needs your attention — expanded panel with a fixed notice,
+   never the raw tool/command content.
+   NOTE: these class names use underscores (state-waiting_permission) to
+   exactly match the JS state strings ("waiting_permission") — a hyphenated
+   version here silently never matches, which was the actual root cause of
+   a very long-running "nothing visually updates" bug. */
+.state-waiting_permission #mascot,
+.state-waiting_input #mascot {
+  width: 280px;
+  height: 90px;
+  border-radius: 26px;
+}
+
+.notice {
+  display: none;
+}
+
+.state-waiting_permission .notice,
+.state-waiting_input .notice {
+  display: block;
+  color: #fff;
+  font-family: -apple-system, "Segoe UI", sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  text-align: center;
+}
+
+/* turn done: brief soft flash, then settles back to the idle pill.
+   Brightness-only, not box-shadow — stays contained inside the pill instead
+   of clipping into a rectangle at the window edge. */
+.state-turn_done #mascot {
+  animation: done-flash 0.6s ease-out;
+}
+
+@keyframes done-flash {
+  0% {
+    filter: brightness(2.2);
+  }
+  100% {
+    filter: brightness(1);
+  }
+}
+

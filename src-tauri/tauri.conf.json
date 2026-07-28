@@ -24,9 +24,9 @@
         "visible": true
       },
       {
-        "label": "notepad",
-        "title": "Notepad",
-        "url": "notepad/notepad.html",
+        "label": "workspace",
+        "title": "Workspace",
+        "url": "workspace/workspace.html",
         "width": 900,
         "height": 600,
         "minWidth": 480,

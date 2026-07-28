@@ -331,6 +331,79 @@ body {
   font-size: 11px;
 }
 
+.llm-profile-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.llm-profile-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: #1a1a1a;
+  border: 1px solid #262626;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.llm-profile-row:hover {
+  border-color: #444;
+}
+
+.llm-profile-row.editing {
+  border-color: #e8b04b;
+  background: rgba(232, 176, 75, 0.08);
+}
+
+.llm-profile-row-label {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 600;
+  color: #eee;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.llm-profile-row-model {
+  font-size: 11px;
+  color: #777;
+  flex: 0 0 auto;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.llm-profile-row-del {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: #777;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.llm-profile-row-del:hover {
+  background: rgba(220, 80, 80, 0.15);
+  color: #e79797;
+}
+
+.llm-profile-empty {
+  font-size: 12px;
+  color: #666;
+  padding: 4px 0;
+}
+
 .panel-divider {
   flex: 0 0 auto;
   height: 1px;
@@ -437,4 +510,82 @@ body {
   font-size: 11px;
   color: #777;
   flex: 0 0 auto;
+}
+
+/* ---------- Voice assistant section ---------- */
+
+/* A quieter second-level hint, for the sentence that qualifies the control
+   directly above it rather than introducing the whole section. */
+.hint.subtle {
+  font-size: 11px;
+  color: #6d6d6d;
+  margin-top: -2px;
+}
+
+/* Parameter and flag names inside a hint. Rendered as a name rather than as
+   emphasis, matching how `.field em` is already used for labels above —
+   italic prose would read as stress, not as an identifier. */
+.hint em {
+  font-style: normal;
+  color: #9d9d9d;
+}
+
+.voice-readiness {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.voice-check {
+  font-size: 12px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid #2a2a2a;
+  background: #191919;
+  color: #9a9a9a;
+}
+
+.voice-check.ok {
+  color: #7fc98a;
+  border-color: #26382a;
+}
+
+/* Amber, not red: a dependency that isn't configured yet is an unfinished
+   setup step, not an error. Clickable (it jumps to the section that fixes
+   it), which the pointer and hover state have to advertise. */
+.voice-check.missing {
+  color: #e8b04b;
+  border-color: #3d3220;
+  cursor: pointer;
+}
+
+.voice-check.missing:hover,
+.voice-check.missing:focus-visible {
+  background: #221d12;
+  border-color: #6b4a1e;
+  outline: none;
+}
+
+.slider-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.slider-row input[type="range"] {
+  flex: 1;
+  accent-color: #e8b04b;
+  /* The generic `.field input` styling above is built for text boxes — its
+     padding and border turn a range input into a boxed-in slider. */
+  padding: 0;
+  border: none;
+  background: none;
+}
+
+.slider-row output {
+  min-width: 34px;
+  text-align: right;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: #f0f0f0;
 }

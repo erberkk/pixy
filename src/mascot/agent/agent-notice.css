@@ -1,0 +1,460 @@
+/* Agent permission card (see agent-notice.js): tool preview, diffs,
+   AskUserQuestion chips and the agent-sessions list. */
+/* agent_permission: the embedded agent terminal (agent/terminal.rs) detected a
+   real interactive permission prompt in its raw output and is waiting for
+   Approve/Deny — clicking writes the matching keystroke(s) straight back
+   into that CLI's stdin. Pinned open the same way as the digest card, but
+   sized to its CONTENT (width/height: fit-content, bounded by min/max)
+   instead of a fixed box — a one-line command shouldn't sit in a mostly
+   empty 700x400 card. */
+.state-agent_permission #mascot {
+  width: fit-content;
+  min-width: 340px;
+  max-width: 620px;
+  height: fit-content;
+  min-height: 140px;
+  /* Taller ceiling than the old single-card version — several stacked
+     .permission-card entries (one per concurrently-running agent CLI
+     waiting on a decision) need more room before the list itself scrolls. */
+  max-height: 620px;
+  border-radius: 20px;
+  padding: 18px 20px;
+  background: #0d0d0d;
+  border: 1px solid #262626;
+  /* fit-content can't be smoothly animated (browsers can't interpolate to
+     an intrinsic-sizing keyword) — the base pill's width/height transition
+     just snaps to it in an extra visible step instead of animating,
+     reading as the card "settling" twice. Disabling the transition here
+     makes it appear in one clean step instead. */
+  transition: border-color 0.25s ease, filter 0.15s ease;
+}
+
+/* Container for one-or-more .permission-card entries — each concurrently
+   pending Claude Code session (one per pooled terminal slot) gets its own
+   card stacked vertically here rather than the UI showing/queuing them one
+   at a time. Scrolls internally if the stack (or even a single long command/
+   diff) outgrows this budget instead of growing the window forever.
+   #mascot is a GRID container here (see .pip-row rules above), not flex —
+   `flex: 1 1 auto` on a grid item does nothing, and a grid item's intrinsic
+   (fit-content) sizing pass largely ignores its own `overflow-y: auto` when
+   computing the PARENT's fit-content height, so #mascot was growing to fit
+   the full unclipped content first and only hard-clipping it afterwards via
+   `overflow: hidden` — past the clip, there was no still-visible scrollbar
+   to reach, which is exactly the "can't scroll down to Approve/Deny" bug
+   this replaces. An explicit px max-height sidesteps all of that: it's a
+   hard leaf-level constraint the browser applies before any of #mascot's
+   own sizing math, so the scrollbar always has real, reachable room.
+   620px max-height on #mascot minus ~18px vertical padding minus ~50px for
+   the header row above whichever card is scrolled leaves this budget. */
+.state-agent_permission .notice {
+  display: flex;
+  flex-direction: column;
+  max-height: 560px;
+  gap: 14px;
+  overflow-y: auto;
+  font-family: -apple-system, "Segoe UI", sans-serif;
+  text-align: left;
+  width: 100%;
+}
+
+.state-agent_permission .notice::-webkit-scrollbar {
+  width: 7px;
+}
+.state-agent_permission .notice::-webkit-scrollbar-track {
+  background: transparent;
+}
+.state-agent_permission .notice::-webkit-scrollbar-thumb {
+  background: #3a3a3a;
+  border-radius: 7px;
+}
+
+.permission-card {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  gap: 12px;
+}
+
+.permission-card + .permission-card {
+  padding-top: 14px;
+  border-top: 1px solid #262626;
+}
+
+.permission-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #eee;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.permission-header-source {
+  color: #888;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.permission-header-text {
+  color: #aaa;
+  font-size: 12px;
+  font-weight: 500;
+  flex: 1 1 auto;
+}
+
+.permission-dismiss-btn {
+  flex: 0 0 auto;
+  background: transparent;
+  border: none;
+  color: #666;
+  font-size: 16px;
+  line-height: 1;
+  padding: 2px 4px;
+  cursor: pointer;
+}
+
+.permission-dismiss-btn:hover {
+  color: #e05c5c;
+}
+
+/* One colored pill per agent CLI — same idea as the reference screenshot's
+   top-right model/tool badges, gives each concurrently-running CLI its own
+   visual identity at a glance instead of everything reading the same gray. */
+.agent-badge {
+  flex: 0 0 auto;
+  padding: 3px 9px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  border: 1px solid transparent;
+}
+
+.agent-badge--claude {
+  background: rgba(217, 119, 87, 0.16);
+  border-color: rgba(217, 119, 87, 0.4);
+  color: #e29073;
+}
+
+.agent-badge--idle {
+  background: rgba(148, 163, 184, 0.14);
+  border-color: rgba(148, 163, 184, 0.35);
+  color: #9aa4b2;
+}
+
+.permission-preview {
+  flex: 0 0 auto;
+  max-height: 260px;
+  overflow-y: auto;
+  background: #161616;
+  border: 1px solid #232323;
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.permission-preview::-webkit-scrollbar {
+  width: 7px;
+}
+.permission-preview::-webkit-scrollbar-track {
+  background: transparent;
+}
+.permission-preview::-webkit-scrollbar-thumb {
+  background: #3a3a3a;
+  border-radius: 7px;
+}
+
+/* Tool name (e.g. "Bash", "Edit") — its own badge-like styling so it reads
+   as a label, not just another line of body text. */
+.permission-tool {
+  color: #e8b04b;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Bash's optional description / Task's subagent_type — a small dim caption
+   line above the actual command/code block. */
+.permission-tool-desc {
+  color: #999;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.permission-file-path {
+  color: #8b949e;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 11.5px;
+  padding: 0 4px 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Bash command / Write content / raw JSON fallback — real tool_input text
+   straight from the Claude Code hook, not a scraped-and-guessed preview. */
+.permission-code {
+  color: #ddd;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 12.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: #161616;
+  border: 1px solid #232323;
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+/* One row per changed line — marker + code laid out in fixed columns with a
+   full-row tint per marker, instead of a flat stack of colored text.
+   old_string/new_string are exact from the hook, so this is a plain
+   remove-then-add rendering rather than a real line-level diff — still far
+   more accurate than the previous screen-scraped preview. */
+.diff-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 12.5px;
+  line-height: 1.5;
+  padding: 0 4px;
+  border-radius: 3px;
+}
+
+.diff-row--add {
+  background: rgba(63, 185, 80, 0.12);
+}
+
+.diff-row--remove {
+  background: rgba(224, 92, 92, 0.12);
+}
+
+.diff-marker {
+  flex: 0 0 10px;
+  font-weight: 700;
+}
+
+.diff-row--add .diff-marker {
+  color: #3fb950;
+}
+
+.diff-row--remove .diff-marker {
+  color: #e05c5c;
+}
+
+.diff-code {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #ddd;
+}
+
+.permission-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 10px;
+  justify-content: center;
+}
+
+/* AskUserQuestion rendering — Claude Code's own multi-choice prompt, shown
+   as tappable chips instead of the Bash/Write/etc Approve/Deny card (see
+   main.js's buildQuestionUI). Answers travel back through the same
+   PermissionRequest hook response as approve/deny, just with updatedInput
+   set instead of left empty. */
+/* Centered as a unit, not left-aligned — .notice sets text-align:left for
+   the Bash/Write/etc tool cards (command/diff text reads better flush left),
+   but AskUserQuestion has no code/path content to align against, so
+   left-aligned text next to centered Submit/Show-all-agents buttons below
+   it just reads as accidentally shifted left. */
+.question-block {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  text-align: center;
+}
+
+.question-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.question-header {
+  color: #888;
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.question-text {
+  color: #ddd;
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.question-options {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+}
+
+.question-chip {
+  background: #1c1c1c;
+  border: 1px solid #3a3a3a;
+  color: #ccc;
+  border-radius: 999px;
+  padding: 5px 13px;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.question-chip:hover {
+  border-color: #666;
+  color: #fff;
+}
+
+.question-chip.selected {
+  background: rgba(92, 158, 191, 0.18);
+  border-color: #5c9ebf;
+  color: #7fc3e8;
+}
+
+.question-submit {
+  align-self: center;
+  margin-top: 2px;
+}
+
+/* "Show all agents" — collapsed by default, sits below whatever permission
+   card(s) are showing so it never competes with the actual decision the user
+   needs to make right now. */
+.show-all-agents-btn {
+  flex: 0 0 auto;
+  align-self: center;
+  margin-top: 2px;
+  background: transparent;
+  border: 1px solid #2a2a2a;
+  color: #888;
+  border-radius: 8px;
+  padding: 5px 14px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+}
+
+.show-all-agents-btn:hover {
+  border-color: #444;
+  color: #ccc;
+}
+
+.agent-sessions-list {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: #131313;
+  border: 1px solid #232323;
+  border-radius: 10px;
+  padding: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.agent-sessions-list::-webkit-scrollbar {
+  width: 7px;
+}
+.agent-sessions-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+.agent-sessions-list::-webkit-scrollbar-thumb {
+  background: #3a3a3a;
+  border-radius: 7px;
+}
+
+.agent-session-empty {
+  color: #666;
+  font-size: 12px;
+  text-align: center;
+  padding: 6px 0;
+}
+
+.agent-session-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.agent-session-row:hover {
+  background: #1c1c1c;
+}
+
+.agent-session-info {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.agent-session-label {
+  color: #ddd;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.agent-session-activity {
+  color: #888;
+  font-size: 11.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: Consolas, "Courier New", monospace;
+}
+
+.agent-session-pending-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #e8b04b;
+  box-shadow: 0 0 0 3px rgba(232, 176, 75, 0.2);
+}
+
+.permission-btn {
+  background: #262626;
+  border: 1px solid #444;
+  color: #ddd;
+  border-radius: 8px;
+  padding: 6px 18px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.permission-btn--approve:hover {
+  background: #333;
+  border-color: #5cbf7e;
+  color: #5cbf7e;
+}
+
+.permission-btn--deny:hover {
+  background: #333;
+  border-color: #e05c5c;
+  color: #e05c5c;
+}
