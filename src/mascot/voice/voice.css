@@ -1,0 +1,45 @@
+/* The voice assistant's own notice state (voice/voice.js). The listening,
+   thinking and answering turns need no CSS at all — they are pip states, drawn
+   on the canvas — so the only thing styled here is the error message, which
+   needs words and therefore the notice area.
+
+   The per-state layout selectors live here rather than being appended to the
+   lists in notice/notice.css, so this feature stays inside its own folder. They
+   are purely additive (no property in them is also set for these elements
+   elsewhere), so the cascade order between the two files doesn't matter. */
+.state-voice_error #mascot {
+  width: 300px;
+  height: auto;
+  min-height: 46px;
+  border-radius: 14px;
+  padding: 8px 12px;
+  /* Amber rather than the accent colour: this is the "I couldn't do what you
+     asked" state, and it should not look like a normal answer. */
+  border-color: #6b4a1e;
+  --a: #e8b04b;
+}
+
+.state-voice_error .pip-row {
+  grid-column: 1;
+  grid-row: 1 / -1;
+  align-self: center;
+}
+
+.state-voice_error .notice {
+  /* notice/notice.css hides .notice by default and each state class opts back
+     in — without this the message is set but never rendered. */
+  display: block;
+  grid-column: 2;
+  font-size: 11px;
+  line-height: 1.45;
+  color: #e8d9bd;
+  /* A failure can be a long sentence from a server ("HTTP 404: model ... not
+     found"), so it wraps instead of being clipped to one line. */
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.state-voice_error .pip-ind,
+.state-voice_error .pip-text {
+  display: none;
+}

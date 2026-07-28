@@ -4,7 +4,7 @@
   "description": "Capability for the main window",
   "windows": [
     "mascot",
-    "notepad",
+    "workspace",
     "settings",
     "terminal",
     "terminal2",

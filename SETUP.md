@@ -70,6 +70,18 @@ rather than replacing the whole file.
           }
         ]
       }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "curl -s -X POST http://127.0.0.1:47623/event -H \"Content-Type: application/json\" -d \"{\\\"state\\\":\\\"thinking\\\"}\"",
+            "timeout": 5
+          }
+        ]
+      }
     ]
   }
 }
@@ -92,7 +104,7 @@ So `/decide`'s HTTP request is held open — not responded to immediately —
 for as long as it takes the human to click Approve/Deny (or, for
 `AskUserQuestion`, pick option chips and hit Submit) in the mascot. Claude
 Code itself blocks the tool call on that response, so approving/denying from
-the widget IS the decision; `terminal.rs` no longer writes `"1"` or any
+the widget IS the decision; `agent/terminal.rs` no longer writes `"1"` or any
 other digit into the terminal's PTY for this at all — that entire mechanism
 (`highest_numbered_option`, `wait_for_prompt_visible`, `write_keys`) was
 deleted. The PTY is now purely a rendering surface for whatever the user
@@ -127,7 +139,7 @@ generic notice. This app is still Claude Code only — no Codex/Cursor/
 Antigravity support.
 
 **`WIDGET_TERMINAL_LABEL` correlates a hook event to a terminal window.**
-`terminal.rs` sets this env var when it spawns each pooled terminal's shell
+`agent/terminal.rs` sets this env var when it spawns each pooled terminal's shell
 (`"terminal"`, `"terminal2"`, ...) — it's inherited down the process tree
 (shell → `claude` → the hook's own child process), so the hook command above
 can read it straight back via `$WIDGET_TERMINAL_LABEL` with no IPC needed to
@@ -168,12 +180,26 @@ native-resize/webview-repaint mismatch entirely.
 | `idle`              | `PreToolUse` / `PermissionDenied` / default     | Collapses immediately back to the small idle pill                   |
 | `turn_done`         | `Stop`                                          | Brief brightness flash + quiet tick, then settles to idle            |
 
+`UserPromptSubmit` is NOT in this table on purpose — it never touches
+`mascot-state`/body.className at all (see agent/server.rs's `handle_event_request`).
+It's purely an ambient pip-mood signal instead: `signals.js` listens for it
+directly and shows "thinking" for a short window right after the human
+submits a prompt, backing off in favor of "coding" the moment a real
+`PreToolUse` fires. See `src/mascot/signals.js`'s own header comment for how
+the ambient system and this notice/card system stay deliberately decoupled.
+
 ## Manual test (without Claude Code)
 
 With the widget running (`npm run tauri dev`), verify each state from a shell:
 
 ```bash
 curl -X POST http://127.0.0.1:47623/event -d "{\"state\":\"waiting_input\"}"
+
+# Ambient-only — never touches the notice/card system, just the pip mood
+# (signals.js): watch #mascot's data-pip-state switch to "thinking" for
+# ~25s, or immediately back to "coding"/whatever else if you also fire a
+# real hook event in that window.
+curl -X POST http://127.0.0.1:47623/event -d "{\"state\":\"thinking\"}"
 
 # /decide now HOLDS THE CONNECTION OPEN until you click Approve/Deny in the
 # widget — curl will just sit there (that's correct, not a hang). Its
@@ -258,6 +284,6 @@ up again after future changes:
 - This app is Claude Code only by design now — the terminal-screen-scraping
   approach that used to also (best-effort) support Codex/Cursor/Antigravity
   has been removed in favor of Claude Code's own hook system, which those
-  other CLIs don't expose an equivalent of. See `server.rs`'s
+  other CLIs don't expose an equivalent of. See `agent/server.rs`'s
   `resolve_decision`/`handle_decide_request` and this file's design-decisions
   section above.

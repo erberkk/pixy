@@ -26,14 +26,37 @@
           <svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.57.1.79-.25.79-.55 0-.27-.01-1.16-.02-2.11-3.2.7-3.88-1.36-3.88-1.36-.52-1.33-1.28-1.68-1.28-1.68-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.18 1.76 1.18 1.03 1.76 2.7 1.25 3.36.96.1-.75.4-1.25.73-1.54-2.55-.29-5.23-1.28-5.23-5.68 0-1.25.45-2.28 1.18-3.08-.12-.29-.51-1.46.11-3.04 0 0 .96-.31 3.15 1.18a10.9 10.9 0 015.74 0c2.19-1.49 3.15-1.18 3.15-1.18.62 1.58.23 2.75.11 3.04.74.8 1.18 1.83 1.18 3.08 0 4.41-2.69 5.38-5.25 5.67.42.36.78 1.07.78 2.16 0 1.56-.01 2.82-.01 3.2 0 .31.21.66.8.55A10.99 10.99 0 0023.5 12C23.5 5.65 18.35.5 12 .5z"/></svg>
           <span>GitHub</span>
         </button>
+        <button class="hub-nav-item" data-section="stt">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2M12 19v4M8 23h8"/></svg>
+          <span>STT</span>
+        </button>
+        <button class="hub-nav-item" data-section="tts">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M15.5 8.5a5 5 0 010 7M19 5a10 10 0 010 14"/></svg>
+          <span>TTS</span>
+        </button>
+        <button class="hub-nav-item" data-section="voice">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12h2l2-5 2 10 2-13 2 16 2-13 2 10 2-5h2"/></svg>
+          <span>Voice</span>
+        </button>
       </nav>
 
       <div class="hub-content">
         <section class="hub-section active" id="section-llm">
           <p class="hint">
             Connect to any OpenAI-compatible local runtime — Ollama, LM Studio,
-            llama.cpp server, and similar.
+            llama.cpp server, and similar. Add more than one profile to switch
+            between models from the Chat window's model picker.
           </p>
+
+          <div class="llm-profile-list" id="llmProfileList"></div>
+          <button class="btn small" id="newProfileBtn">+ New profile</button>
+
+          <div class="panel-divider"></div>
+
+          <label class="field">
+            <span>Profile name</span>
+            <input id="profileLabel" placeholder="Local Ollama" />
+          </label>
 
           <label class="field">
             <span>Base URL</span>
@@ -63,9 +86,26 @@
               </span>
             </label>
           </div>
+          <p class="hint subtle">
+            Sent as Ollama&rsquo;s <em>think</em> flag on servers that have its native
+            API, and as <em>reasoning_effort</em> everywhere else. Models that don&rsquo;t
+            accept either one ignore it &mdash; and a reasoning model reasons whether
+            this is on or off, so switching it off is a request rather than a
+            guarantee.
+          </p>
+
+          <div class="status" id="llmStatus"></div>
+
+          <div class="actions">
+            <button class="btn" id="llmTestBtn">Test connection</button>
+            <button class="btn" id="deleteProfileBtn">Delete profile</button>
+            <button class="btn primary" id="llmSaveBtn">Save profile</button>
+          </div>
+
+          <div class="panel-divider"></div>
 
           <label class="switch-row">
-            <span>Auto-start this server when the widget launches</span>
+            <span>Auto-start a local server when the widget launches</span>
             <span class="switch">
               <input type="checkbox" id="autostart" />
               <span class="switch-track"><span class="switch-thumb"></span></span>
@@ -77,11 +117,8 @@
             <input id="startCommand" placeholder="ollama serve" />
           </label>
 
-          <div class="status" id="llmStatus"></div>
-
           <div class="actions">
-            <button class="btn" id="llmTestBtn">Test connection</button>
-            <button class="btn primary" id="llmSaveBtn">Save</button>
+            <button class="btn" id="llmStartNowBtn">Start now</button>
           </div>
         </section>
 
@@ -121,6 +158,176 @@
             <h4>My pull requests</h4>
             <div class="report-list" id="prsList"></div>
           </div>
+        </section>
+
+        <section class="hub-section" id="section-stt">
+          <p class="hint">
+            Speech-to-text connection profiles. Not wired to anything yet —
+            this just holds connection details ahead of that feature.
+          </p>
+
+          <div class="llm-profile-list" id="sttProfileList"></div>
+          <button class="btn small" id="sttNewProfileBtn">+ New profile</button>
+
+          <div class="panel-divider"></div>
+
+          <label class="field">
+            <span>Profile name</span>
+            <input id="sttProfileLabel" placeholder="Local Whisper" />
+          </label>
+
+          <label class="field">
+            <span>Base URL</span>
+            <input id="sttBaseUrl" placeholder="http://localhost:9000" />
+          </label>
+
+          <label class="field">
+            <span>Model name</span>
+            <input id="sttModel" placeholder="whisper-1" />
+          </label>
+
+          <label class="field">
+            <span>Spoken language <em>(optional)</em></span>
+            <input id="sttLanguage" placeholder="tr" maxlength="8" />
+          </label>
+          <p class="hint subtle">
+            Two-letter code &mdash; <em>tr</em>, <em>en</em>, <em>de</em>&hellip; Leave empty to let the
+            server detect it. Worth filling in for anything but English: detection
+            only gets about a second of speech to go on and leans heavily English,
+            so a Turkish sentence can come back as confident English nonsense.
+          </p>
+
+          <label class="field">
+            <span>API Key <em>(optional)</em></span>
+            <input id="sttApiKey" type="password" placeholder="—" />
+          </label>
+
+          <div class="status" id="sttStatus"></div>
+
+          <div class="actions">
+            <button class="btn" id="sttDeleteProfileBtn">Delete profile</button>
+            <button class="btn primary" id="sttSaveBtn">Save profile</button>
+          </div>
+
+          <div class="panel-divider"></div>
+
+          <label class="switch-row">
+            <span>Auto-start a local server when the widget launches</span>
+            <span class="switch">
+              <input type="checkbox" id="sttAutostart" />
+              <span class="switch-track"><span class="switch-thumb"></span></span>
+            </span>
+          </label>
+
+          <label class="field">
+            <span>Start command</span>
+            <input id="sttStartCommand" placeholder="whisper-server.exe -m ggml-large-v3-turbo.bin" />
+          </label>
+
+          <div class="actions">
+            <button class="btn" id="sttStartNowBtn">Start now</button>
+          </div>
+        </section>
+
+        <section class="hub-section" id="section-tts">
+          <p class="hint">
+            Text-to-speech connection profiles. Not wired to anything yet —
+            this just holds connection details ahead of that feature.
+          </p>
+
+          <div class="llm-profile-list" id="ttsProfileList"></div>
+          <button class="btn small" id="ttsNewProfileBtn">+ New profile</button>
+
+          <div class="panel-divider"></div>
+
+          <label class="field">
+            <span>Profile name</span>
+            <input id="ttsProfileLabel" placeholder="Local Piper" />
+          </label>
+
+          <label class="field">
+            <span>Base URL</span>
+            <input id="ttsBaseUrl" placeholder="http://localhost:5002" />
+          </label>
+
+          <label class="field">
+            <span>Model name</span>
+            <input id="ttsModel" placeholder="tts-1" />
+          </label>
+
+          <label class="field">
+            <span>Voice</span>
+            <input id="ttsVoice" placeholder="alloy" />
+          </label>
+
+          <label class="field">
+            <span>API Key <em>(optional)</em></span>
+            <input id="ttsApiKey" type="password" placeholder="—" />
+          </label>
+
+          <div class="status" id="ttsStatus"></div>
+
+          <div class="actions">
+            <button class="btn" id="ttsDeleteProfileBtn">Delete profile</button>
+            <button class="btn primary" id="ttsSaveBtn">Save profile</button>
+          </div>
+
+          <div class="panel-divider"></div>
+
+          <label class="switch-row">
+            <span>Auto-start a local server when the widget launches</span>
+            <span class="switch">
+              <input type="checkbox" id="ttsAutostart" />
+              <span class="switch-track"><span class="switch-thumb"></span></span>
+            </span>
+          </label>
+
+          <label class="field">
+            <span>Start command</span>
+            <input id="ttsStartCommand" placeholder="python server.py" />
+          </label>
+
+          <div class="actions">
+            <button class="btn" id="ttsStartNowBtn">Start now</button>
+          </div>
+        </section>
+
+        <section class="hub-section" id="section-voice">
+          <p class="hint">
+            Say <strong>&ldquo;Hey Pixy&rdquo;</strong> while the widget is running and it
+            records you, transcribes what you said, answers with the active LLM
+            profile and reads the answer back. Uses the STT and TTS profiles from
+            the sections above &mdash; all three have to be configured.
+          </p>
+
+          <div class="voice-readiness" id="voiceReadiness"></div>
+
+          <label class="switch-row">
+            <span>Listen for the wake word</span>
+            <span class="switch">
+              <input type="checkbox" id="voiceEnabled" />
+              <span class="switch-track"><span class="switch-thumb"></span></span>
+            </span>
+          </label>
+          <p class="hint subtle">
+            While this is on, the microphone stays open so the wake word can be
+            heard. Nothing is recorded or sent anywhere until it fires.
+          </p>
+
+          <div class="panel-divider"></div>
+
+          <label class="field">
+            <span>Wake-word sensitivity</span>
+            <div class="slider-row">
+              <input type="range" id="voiceThreshold" min="0.05" max="0.95" step="0.05" />
+              <output id="voiceThresholdOut"></output>
+            </div>
+          </label>
+          <p class="hint subtle">
+            Lower is more sensitive: it catches the wake word more often, and
+            also fires on things that only sound like it. Raise it if it triggers
+            by itself; lower it if it keeps missing you.
+          </p>
         </section>
       </div>
     </div>

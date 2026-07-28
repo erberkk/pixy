@@ -1,0 +1,29 @@
+/* Mascot window base: reset and the body/window frame. The pill itself, its
+   notice states and each notice kind live in the sibling stylesheets, linked
+   after this one so the cascade order matches the single stylesheet these
+   were split out of. */
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* The OS window is a fixed, larger-than-needed size (see tauri.conf.json) so
+   the pill never has to physically resize the native window at runtime —
+   growing/shrinking happens entirely below, via CSS on #mascot itself. */
+body {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  position: relative;
+}

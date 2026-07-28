@@ -1,0 +1,477 @@
+/* Memory mode: the force-directed graph canvas, node detail panel and the
+   memory-sources manager. */
+/* ---------- MEMORY GRAPH ---------- */
+/* Read-only viewer over Claude Code's own memory files (content/memory.rs) — a
+   second sidebar-mode-and-main pairing living alongside the notes one,
+   toggled by .mode-tabs. Extends the existing --bg/--border/--accent
+   system rather than introducing a separate palette. */
+
+.mode-tabs {
+  display: flex;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+  margin-right: 10px;
+}
+.mode-tab {
+  flex: 1;
+  background: transparent;
+  border: 1px solid var(--border-soft);
+  color: var(--text-faint);
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 0;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background 0.2s var(--ease), color 0.2s var(--ease), border-color 0.2s var(--ease);
+}
+.mode-tab:hover {
+  color: var(--text-dim);
+}
+.mode-tab.active {
+  background: var(--accent-soft);
+  border-color: transparent;
+  color: var(--accent);
+}
+
+.memory-filters {
+  display: none;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 14px 10px;
+}
+.memory-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.memory-chip {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-family: var(--sans);
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.memory-chip:hover {
+  border-color: var(--text-faint);
+  color: var(--text);
+}
+.memory-chip.active {
+  background: var(--accent-soft);
+  border-color: transparent;
+  color: var(--accent);
+}
+
+.memory-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 10px 10px;
+  display: none;
+}
+.memory-item {
+  padding: 9px 10px;
+  border-radius: 9px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: 2px;
+}
+.memory-item:hover {
+  background: var(--bg-elevated-hover);
+}
+.memory-item.active {
+  background: var(--accent-soft);
+}
+.memory-item-top {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+.memory-item-dot {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.memory-item-name {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.memory-item-desc {
+  font-size: 11.5px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-left: 15px;
+}
+.memory-item-project {
+  font-size: 10px;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding-left: 15px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.memory-item-project .dot-sep {
+  width: 2px;
+  height: 2px;
+  border-radius: 50%;
+  background: var(--text-faint);
+  flex-shrink: 0;
+}
+.memory-item-time {
+  margin-left: auto;
+  font-size: 10px;
+  font-family: var(--mono);
+  color: var(--text-faint);
+  flex-shrink: 0;
+}
+.memory-chip .chip-count {
+  opacity: 0.65;
+  margin-left: 3px;
+}
+
+.memory-main {
+  flex-direction: column;
+}
+.memory-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border-soft);
+  flex-shrink: 0;
+}
+.memory-toolbar-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
+.memory-toolbar-count {
+  flex: 1;
+  font-size: 11px;
+  font-family: var(--mono);
+  color: var(--text-faint);
+  margin-left: 8px;
+}
+
+.memory-graph-wrap {
+  flex: 1;
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 1px 1px, var(--border-soft) 1px, transparent 0) 0 0 / 22px 22px;
+}
+#memoryCanvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+}
+
+.memory-legend {
+  position: absolute;
+  left: 14px;
+  bottom: 14px;
+  display: none;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px 10px;
+  background: rgba(21, 21, 23, 0.85);
+  border: 1px solid var(--border-soft);
+  border-radius: 9px;
+  backdrop-filter: blur(4px);
+  pointer-events: none;
+  z-index: 5;
+}
+.memory-legend-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10.5px;
+  color: var(--text-dim);
+  font-family: var(--sans);
+  white-space: nowrap;
+}
+.memory-legend-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.memory-tooltip {
+  position: absolute;
+  max-width: 240px;
+  padding: 8px 10px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.45);
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-dim);
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(2px);
+  transition: opacity 0.12s var(--ease), transform 0.12s var(--ease);
+  z-index: 15;
+}
+.memory-tooltip.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+.memory-tooltip .tt-name {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 2px;
+}
+.memory-tooltip .tt-desc {
+  color: var(--text-dim);
+}
+.memory-tooltip .tt-meta {
+  font-size: 10px;
+  font-family: var(--mono);
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-top: 4px;
+}
+
+.memory-empty {
+  position: absolute;
+  inset: 0;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: var(--text-faint);
+  text-align: center;
+  padding: 0 40px;
+  pointer-events: none;
+}
+.memory-empty svg { width: 40px; height: 40px; color: var(--border); }
+.memory-empty p { font-size: 13px; max-width: 320px; }
+.memory-empty p:first-of-type { font-size: 14px; font-weight: 700; color: var(--text-dim); }
+
+.memory-detail {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  bottom: 14px;
+  width: 320px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  transform: translateX(calc(100% + 28px));
+  opacity: 0;
+  transition: transform 0.28s var(--ease), opacity 0.28s var(--ease);
+  z-index: 20;
+}
+.memory-detail.visible {
+  transform: translateX(0);
+  opacity: 1;
+}
+.memory-detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.memory-detail-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.memory-detail-head-actions .icon-btn {
+  width: 26px;
+  height: 26px;
+}
+.memory-detail-head-actions .icon-btn svg {
+  width: 13px;
+  height: 13px;
+}
+.memory-detail-type {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 3px 9px;
+  border-radius: 999px;
+}
+.memory-detail-name {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+  word-break: break-word;
+}
+.memory-detail-desc {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+.memory-detail-meta {
+  font-size: 10.5px;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.memory-detail-body {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text);
+}
+.memory-detail-body :is(h1, h2, h3) { color: var(--text); margin: 0.6em 0 0.3em; }
+.memory-detail-body p { margin: 0.5em 0; }
+.memory-detail-body a.wiki-link {
+  color: var(--accent);
+  background: var(--accent-softer);
+  padding: 0 4px;
+  border-radius: 4px;
+  text-decoration: none;
+  cursor: pointer;
+}
+.memory-detail-body a.wiki-link:hover { background: var(--accent-soft); }
+.memory-detail-body code {
+  font-family: var(--mono);
+  font-size: 0.9em;
+  background: var(--bg);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+/* ---------- MEMORY SOURCES ---------- */
+/* Which ~/.claude/projects-shaped directories the graph reads from — see
+   content/memory.rs's get_memory_roots/add_memory_root/remove_memory_root. Slides
+   in from the left, mirroring .memory-detail's own slide-in-from-the-right
+   treatment so the two never fight for the same visual language. */
+.memory-sources-panel {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  bottom: 14px;
+  width: 300px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transform: translateX(calc(-100% - 28px));
+  opacity: 0;
+  transition: transform 0.28s var(--ease), opacity 0.28s var(--ease);
+  z-index: 21;
+}
+.memory-sources-panel.visible {
+  transform: translateX(0);
+  opacity: 1;
+}
+.memory-sources-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.memory-sources-head h3 {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
+.memory-sources-list {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.memory-source-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 9px;
+  border-radius: 8px;
+  background: var(--bg);
+  border: 1px solid var(--border-soft);
+}
+.memory-source-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.memory-source-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-faint);
+}
+.memory-source-row.missing .memory-source-label {
+  color: var(--danger);
+}
+.memory-source-path {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl;
+  text-align: left;
+}
+.memory-source-remove {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.memory-source-remove:hover {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+.memory-source-remove svg {
+  width: 12px;
+  height: 12px;
+}
+.memory-add-source-btn {
+  margin: 0;
+  width: 100%;
+}
+

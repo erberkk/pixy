@@ -1,11 +1,10 @@
-const { invoke } = window.__TAURI__.core;
-const { listen } = window.__TAURI__.event;
+import { invoke, listen, currentWindow } from "../shared/tauri.js";
 
 // Each pooled terminal window (see tauri.conf.json's terminal/terminal2/3/4
-// + windows.rs's TERMINAL_POOL) runs this same file — labeling the titlebar
+// + ui/windows.rs's TERMINAL_POOL) runs this same file — labeling the titlebar
 // with its own slot number is the only thing that tells them apart visually
 // when several are open at once.
-const currentLabel = window.__TAURI__.window.getCurrentWindow().label;
+const currentLabel = currentWindow().label;
 const slotMatch = currentLabel.match(/(\d+)$/);
 document.getElementById("titlebar-title").textContent = slotMatch
   ? `Agent Terminal ${slotMatch[1]}`
@@ -59,7 +58,7 @@ function reportSnapshot() {
   invoke("report_terminal_text", { text: lines.join("\n") }).catch(() => {});
 }
 
-// Event NAME is suffixed with this window's own label (see terminal.rs) —
+// Event NAME is suffixed with this window's own label (see agent/terminal.rs) —
 // plain listen() with no target option matches ANY emit target by default,
 // so a shared event name across all pooled terminal windows meant every
 // window's xterm received every OTHER window's output too (keystrokes
@@ -83,8 +82,8 @@ document.getElementById("titlebar-close").addEventListener("click", () => {
   invoke("hide_terminal");
 });
 document.getElementById("titlebar-minimize").addEventListener("click", () => {
-  window.__TAURI__.window.getCurrentWindow().minimize();
+  currentWindow().minimize();
 });
 document.getElementById("titlebar-maximize").addEventListener("click", () => {
-  window.__TAURI__.window.getCurrentWindow().toggleMaximize();
+  currentWindow().toggleMaximize();
 });

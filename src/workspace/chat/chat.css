@@ -1,0 +1,490 @@
+/* =====================================================================
+   Chat mode — direct conversation with a locally-configured LLM (see
+   ai/llm.rs / ai/chat.rs). Deliberately no per-message avatars or drop shadows —
+   just alignment + a subtle bubble tint distinguishes user from assistant,
+   matching the rest of this app's flat, quiet visual language. The one
+   mascot on this screen lives in the composer + empty state, not repeated
+   per message.
+   ===================================================================== */
+
+.chat-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 10px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.chat-item {
+  position: relative;
+  padding: 10px 34px 10px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.18s var(--ease);
+  animation: itemIn 0.3s var(--ease);
+  border-left: 2px solid transparent;
+}
+.chat-item:hover {
+  background: var(--bg-elevated);
+}
+.chat-item.active {
+  border-left: 2px solid var(--accent);
+}
+.chat-item-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chat-item.active .chat-item-title {
+  color: var(--accent);
+}
+.chat-item-meta {
+  font-size: 10.5px;
+  color: var(--text-faint);
+  font-family: var(--mono);
+  margin-top: 4px;
+  display: block;
+}
+.chat-item-delete {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  opacity: 0;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: transparent;
+  border: none;
+  color: var(--text-faint);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.15s var(--ease);
+}
+.chat-item:hover .chat-item-delete {
+  opacity: 1;
+}
+.chat-item-delete:hover {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+.chat-item-delete svg {
+  width: 12px;
+  height: 12px;
+}
+.chat-empty-list {
+  padding: 30px 16px;
+  text-align: center;
+  color: var(--text-faint);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.chat-topbar {
+  gap: 10px 12px;
+  position: relative;
+}
+
+/* Per-chat "instructions" (system prompt) editor — a small dropdown under
+   the topbar's instructions button rather than a modal, since it's a quick
+   set-and-forget field, not a multi-step flow. */
+.chat-instructions-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 22px;
+  width: 340px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transform: translateY(-6px);
+  opacity: 0;
+  pointer-events: none;
+  transition: transform 0.2s var(--ease), opacity 0.2s var(--ease);
+  z-index: 30;
+}
+.chat-instructions-panel.visible {
+  transform: translateY(0);
+  opacity: 1;
+  pointer-events: auto;
+}
+.chat-instructions-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+#chatInstructionsInput {
+  width: 100%;
+  min-height: 90px;
+  resize: vertical;
+  background: var(--bg-elevated-hover);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 12.5px;
+  line-height: 1.5;
+  outline: none;
+}
+#chatInstructionsInput:focus {
+  border-color: var(--accent);
+}
+.chat-instructions-hint {
+  font-size: 10.5px;
+  color: var(--text-faint);
+  line-height: 1.4;
+}
+.chat-model-select {
+  flex: 0 0 auto;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 7px 10px;
+  border-radius: 8px;
+  outline: none;
+  cursor: pointer;
+  max-width: 200px;
+}
+.chat-model-select:hover,
+.chat-model-select:focus {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.chat-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden;
+}
+
+.chat-messages {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 22px 26px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.chat-msg {
+  display: flex;
+  max-width: 72%;
+}
+.chat-msg.user {
+  align-self: flex-end;
+}
+.chat-msg.assistant {
+  align-self: flex-start;
+}
+.chat-msg-bubble {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-soft);
+  border-radius: 14px;
+  padding: 10px 14px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.chat-msg.user .chat-msg-bubble {
+  background: var(--accent-soft);
+  border-color: var(--accent-softer);
+}
+
+/* "voice" marker on a spoken turn (chat.js renderMessages). Its own line at the
+   end of the bubble rather than floated into a corner: a bubble's width is set
+   by its text, so an absolutely positioned tag would overlap short replies and
+   sit oddly far from long ones. */
+.chat-msg-tag {
+  display: block;
+  margin-top: 6px;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  /* Quieter than the message it labels — it is provenance, not content. */
+  opacity: 0.75;
+}
+
+.chat-msg.user .chat-msg-tag {
+  text-align: right;
+}
+
+/* Markdown rendering inside a message bubble — same visual language as the
+   notes preview (.preview in this file), just scoped to chat bubbles and
+   without the extra top/bottom margin on the first/last block (a bubble
+   should hug its content, not float it with paragraph spacing). */
+.chat-msg-bubble > :first-child { margin-top: 0; }
+.chat-msg-bubble > :last-child { margin-bottom: 0; }
+.chat-msg-bubble h1,
+.chat-msg-bubble h2,
+.chat-msg-bubble h3,
+.chat-msg-bubble h4,
+.chat-msg-bubble h5,
+.chat-msg-bubble h6 {
+  margin: 0.6em 0 0.3em;
+  line-height: 1.3;
+}
+.chat-msg-bubble h1 { font-size: 1.3em; }
+.chat-msg-bubble h2 { font-size: 1.15em; }
+.chat-msg-bubble h3 { font-size: 1.05em; color: var(--text-dim); }
+.chat-msg-bubble p { margin: 0.5em 0; }
+.chat-msg-bubble strong { color: var(--text); font-weight: 700; }
+.chat-msg-bubble em { color: var(--text-dim); }
+.chat-msg-bubble code {
+  background: var(--bg-elevated-hover);
+  border: 1px solid var(--border);
+  padding: 1px 6px;
+  border-radius: 5px;
+  font-family: var(--mono);
+  font-size: 0.9em;
+  color: var(--accent);
+}
+.chat-msg-bubble pre {
+  background: var(--bg-elevated-hover);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 0.6em 0;
+  overflow-x: auto;
+}
+.chat-msg-bubble pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--text);
+  font-size: 0.88em;
+  line-height: 1.5;
+}
+.chat-msg-bubble blockquote {
+  border-left: 3px solid var(--accent);
+  padding: 2px 14px;
+  color: var(--text-dim);
+  margin: 0.6em 0;
+  background: var(--accent-softer);
+  border-radius: 0 6px 6px 0;
+}
+.chat-msg-bubble ul,
+.chat-msg-bubble ol {
+  padding-left: 1.4em;
+  margin: 0.4em 0;
+}
+.chat-msg-bubble li { margin: 0.25em 0; }
+.chat-msg-bubble hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 1em 0;
+}
+.chat-msg-bubble table {
+  border-collapse: collapse;
+  margin: 0.6em 0;
+  font-size: 0.95em;
+}
+.chat-msg-bubble th,
+.chat-msg-bubble td {
+  border: 1px solid var(--border);
+  padding: 5px 10px;
+  text-align: left;
+}
+.chat-msg-bubble th {
+  background: var(--bg-elevated-hover);
+  color: var(--text);
+  font-weight: 600;
+}
+.chat-msg-bubble a.ext-link { color: var(--accent); }
+.chat-msg.assistant .chat-msg-bubble.streaming::after {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 13px;
+  margin-left: 2px;
+  background: var(--text-dim);
+  vertical-align: text-bottom;
+  animation: chat-caret 0.9s steps(1) infinite;
+}
+@keyframes chat-caret {
+  50% { opacity: 0; }
+}
+
+.chat-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  color: var(--text-faint);
+  text-align: center;
+  pointer-events: none;
+  animation: fadeIn 0.4s var(--ease);
+}
+.chat-empty svg {
+  width: 42px;
+  height: 42px;
+  color: var(--border);
+}
+.chat-empty p {
+  font-size: 13px;
+  max-width: 280px;
+  line-height: 1.5;
+}
+.chat-empty p:first-of-type {
+  color: var(--text-dim);
+  font-weight: 600;
+  font-size: 14px;
+}
+.chat-main.has-active .chat-empty {
+  display: none;
+}
+
+/* The chat mascot (composer avatar): same pip renderer as the main widget
+   (pip.js), but forced to a fixed muted grey regardless of state — a
+   distinct, quieter "assistant" persona for this screen rather than the
+   colorful ambient moods used elsewhere. */
+.chat-mascot {
+  --a: #77777f;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+.chat-mascot-small {
+  width: 30px;
+  height: 30px;
+}
+.chat-mascot-small .pip-canvas {
+  width: 30px;
+  height: 30px;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  display: block;
+}
+
+.chat-attachment-chip {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 22px;
+  padding: 6px 10px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.chat-attachment-chip svg {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+  color: var(--accent);
+}
+.chat-attachment-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-attachment-remove {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  border-radius: 5px;
+}
+.chat-attachment-remove:hover {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+.chat-attachment-remove svg {
+  width: 11px;
+  height: 11px;
+  color: inherit;
+}
+
+.chat-composer {
+  flex-shrink: 0;
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  padding: 12px 22px 18px;
+  border-top: 1px solid var(--border-soft);
+}
+.chat-input {
+  flex: 1;
+  resize: none;
+  max-height: 160px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 14px;
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 13.5px;
+  line-height: 1.5;
+  outline: none;
+  transition: border-color 0.18s var(--ease), background 0.18s var(--ease);
+}
+.chat-input::placeholder {
+  color: var(--text-faint);
+}
+.chat-input:focus {
+  border-color: var(--accent);
+  background: var(--bg-elevated-hover);
+}
+.chat-send-btn {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text-dim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.18s var(--ease);
+}
+.chat-send-btn:hover:not(:disabled) {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.chat-send-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.chat-send-btn svg {
+  width: 15px;
+  height: 15px;
+}
