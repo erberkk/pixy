@@ -1363,28 +1363,6 @@ pub(crate) fn context_for(
         return RecallContext::default();
     };
 
-    // The question's own vector, when meaning search is configured AND can
-    // actually be used. A failure here is not surfaced: the word search below is
-    // a complete answer on its own, and an unreachable embedding server should
-    // degrade the feature, not interrupt the conversation.
-    //
-    // The floor is checked BEFORE the request, not after. Without a measured
-    // floor, search_hybrid skips the meaning path entirely — so embedding the
-    // question first was paying a network round trip (measured at 400ms warm and
-    // 2.8s with the model cold) for a vector that was then thrown away. This
-    // whole call sits between pressing send and the request going out.
-    let (embed_url, embed_model) = embedding_settings(app);
-    let usable = !embed_url.is_empty()
-        && !embed_model.is_empty()
-        && meta_get(&conn, "similarity_floor").is_some();
-    let query_vec = if usable {
-        embed(&embed_url, &embed_model, "", &[query.to_string()], EMBED_QUERY_TIMEOUT_SECS)
-            .ok()
-            .and_then(|mut v| v.pop())
-    } else {
-        None
-    };
-
     let time = parse_time_range(query, chrono::Local::now());
     let opts = SearchOptions {
         limit: tunables::int(app, tunables::RECALL_MAX_TURNS).max(1) as usize,
@@ -1395,8 +1373,45 @@ pub(crate) fn context_for(
         max_per_chat: 1,
         min_coverage: tunables::float(app, tunables::RECALL_MIN_COVERAGE) as f32,
     };
-    let hits =
-        search_hybrid(&conn, query, opts, query_vec.as_deref(), current_chat_id).unwrap_or_default();
+
+    // Words first, and usually last. The word search is a local SQLite query
+    // measured in single-digit milliseconds; embedding the question is a network
+    // round trip measured at 400ms with the model resident and 2.8s with it cold,
+    // and this whole call sits between pressing send and the request going out.
+    //
+    // So the embedding is only paid for when the word search came back with
+    // NOTHING — which is exactly the case it was added for. Meaning search earns
+    // its keep on questions that share no words with the answer: a paraphrase, or
+    // an English question about a Turkish conversation. When the words already
+    // found something, a second ranking to fuse with it is not worth a round trip
+    // on every message.
+    //
+    // What this gives up: when the word search finds a weak-but-passing hit and
+    // the meaning search would have found a better one, the weaker hit stands.
+    // The coverage floor already keeps the weakest out, and the alternative is
+    // paying for meaning search on every message to improve a minority of them.
+    let mut hits = search_hybrid(&conn, query, opts, None, current_chat_id).unwrap_or_default();
+
+    if hits.is_empty() {
+        // The floor is checked before the request, not after: without a measured
+        // one, search_hybrid ignores the meaning path entirely, so embedding the
+        // question would buy a vector that is then thrown away.
+        let (embed_url, embed_model) = embedding_settings(app);
+        let usable = !embed_url.is_empty()
+            && !embed_model.is_empty()
+            && meta_get(&conn, "similarity_floor").is_some();
+        if usable {
+            // A failure here is not surfaced: the empty word result above is a
+            // complete answer on its own, and an unreachable embedding server
+            // should degrade the feature, not interrupt the conversation.
+            let query_vec = embed(&embed_url, &embed_model, "", &[query.to_string()], EMBED_QUERY_TIMEOUT_SECS)
+                .ok()
+                .and_then(|mut v| v.pop());
+            if let Some(vector) = query_vec {
+                hits = search_hybrid(&conn, query, opts, Some(&vector), current_chat_id).unwrap_or_default();
+            }
+        }
+    }
     let max_chars = tunables::int(app, tunables::RECALL_MAX_CHARS).max(0) as usize;
     RecallContext {
         block: format_block(&hits, max_chars),
