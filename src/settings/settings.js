@@ -568,6 +568,222 @@ async function loadVoiceSettings() {
   }
 }
 
+// ---------- Advanced section ----------
+// Generated from the schema src-tauri/src/tunables.rs sends, rather than written
+// out in HTML. Two reasons: adding a setting should be one Rust edit and not
+// four, and a hand-written form drifts from the code that reads it — a field
+// labelled in seconds bound to a value read as milliseconds looks fine and is
+// silently wrong.
+
+let tunableSchema = [];
+let tunableDefaults = {};
+
+// Matches the backend's normalization (tunables.rs's split_names) so "equal to
+// the default" means the same thing on both sides — otherwise typing the default
+// back in with different spacing would save a redundant override.
+function normalizeNames(text) {
+  return String(text)
+    .split(",")
+    .map((part) => part.trim().toLowerCase())
+    .filter(Boolean)
+    .join(",");
+}
+
+function readTunableInput(setting, input) {
+  if (setting.kind === "names") return normalizeNames(input.value);
+  // An empty or unparseable number field reads as the default rather than 0:
+  // clearing a field means "I don't want to set this", not "zero".
+  const number = Number(input.value);
+  return input.value.trim() === "" || Number.isNaN(number) ? tunableDefaults[setting.id] : number;
+}
+
+function isAtDefault(setting, value) {
+  return value === tunableDefaults[setting.id];
+}
+
+function refreshTunableRow(setting, row, input) {
+  const atDefault = isAtDefault(setting, readTunableInput(setting, input));
+  row.classList.toggle("overridden", !atDefault);
+  row.querySelector(".tunable-reset").disabled = atDefault;
+}
+
+// The event port is the one setting with a consequence outside the widget: the
+// Claude Code hooks post to it by number, so changing it here without changing
+// them there silently breaks the integration. Rather than trying to rewrite the
+// user's Claude Code settings, show them exactly what the hooks now have to say.
+function renderEventPortNote(row, input) {
+  const note = document.createElement("p");
+  note.className = "hint subtle tunable-port-note";
+  const update = () => {
+    const port = input.value.trim() || String(tunableDefaults["network.event_port"]);
+    note.textContent =
+      `Your Claude Code hooks have to post to http://127.0.0.1:${port}/event and ` +
+      `/decide — update the commands in ~/.claude/settings.json to match (SETUP.md ` +
+      `has the full block). Takes effect after the widget restarts.`;
+  };
+  update();
+  input.addEventListener("input", update);
+  row.appendChild(note);
+
+  // Whether the port was actually claimed at launch. Shown here because a
+  // release build has no console for the backend to complain to, so a port
+  // already in use would otherwise present as "Claude Code hooks stopped
+  // working" with nothing anywhere to explain why.
+  const live = document.createElement("p");
+  live.className = "hint subtle tunable-port-note";
+  row.appendChild(live);
+  invoke("get_event_server_status")
+    .then((status) => {
+      if (!status.known) {
+        live.remove();
+      } else if (status.listening) {
+        live.textContent = `Currently listening on port ${status.port}.`;
+        live.classList.add("ok");
+      } else {
+        live.textContent =
+          `Not listening on port ${status.port} — ${status.error || "the port could not be claimed"}. ` +
+          `Something else on this machine is probably using it; pick another and restart.`;
+      }
+    })
+    .catch(() => live.remove());
+}
+
+function buildTunableRow(setting, value) {
+  const row = document.createElement("div");
+  row.className = "tunable";
+  row.dataset.id = setting.id;
+
+  const head = document.createElement("div");
+  head.className = "tunable-head";
+  const label = document.createElement("span");
+  label.className = "tunable-label";
+  label.textContent = setting.label;
+  head.appendChild(label);
+  if (setting.restart) {
+    const badge = document.createElement("span");
+    badge.className = "tunable-badge";
+    badge.textContent = "needs restart";
+    head.appendChild(badge);
+  }
+  row.appendChild(head);
+
+  const inputRow = document.createElement("div");
+  inputRow.className = "tunable-input";
+  const input = document.createElement("input");
+  if (setting.kind === "names") {
+    input.type = "text";
+    input.placeholder = setting.default;
+  } else {
+    input.type = "number";
+    input.min = setting.min;
+    input.max = setting.max;
+    input.step = setting.step;
+  }
+  input.value = value;
+  inputRow.appendChild(input);
+
+  if (setting.unit) {
+    const unit = document.createElement("span");
+    unit.className = "tunable-unit";
+    unit.textContent = setting.unit;
+    inputRow.appendChild(unit);
+  }
+
+  const reset = document.createElement("button");
+  reset.className = "tunable-reset";
+  reset.type = "button";
+  reset.textContent = "↺";
+  reset.title = `Back to the default (${setting.default})`;
+  reset.addEventListener("click", () => {
+    input.value = setting.default;
+    refreshTunableRow(setting, row, input);
+    clearStatus(el("advancedStatus"));
+  });
+  inputRow.appendChild(reset);
+  row.appendChild(inputRow);
+
+  const help = document.createElement("p");
+  help.className = "hint subtle tunable-help";
+  help.textContent = setting.help;
+  row.appendChild(help);
+
+  if (setting.id === "network.event_port") renderEventPortNote(row, input);
+
+  input.addEventListener("input", () => {
+    refreshTunableRow(setting, row, input);
+    clearStatus(el("advancedStatus"));
+  });
+  refreshTunableRow(setting, row, input);
+  return row;
+}
+
+async function loadTunableSettings() {
+  const payload = await invoke("get_tunables");
+  tunableSchema = payload.settings;
+  tunableDefaults = Object.fromEntries(payload.settings.map((s) => [s.id, s.default]));
+
+  const container = el("tunableGroups");
+  container.innerHTML = "";
+  // Grouped in the order the backend declares, so related settings stay together
+  // and the form's shape is decided next to the values rather than here.
+  for (const group of payload.groups) {
+    const block = document.createElement("div");
+    block.className = "tunable-group";
+    const heading = document.createElement("h4");
+    heading.textContent = group;
+    block.appendChild(heading);
+    for (const setting of payload.settings.filter((s) => s.group === group)) {
+      block.appendChild(buildTunableRow(setting, payload.values[setting.id]));
+    }
+    container.appendChild(block);
+  }
+}
+
+// Sends every setting, with null for the ones sitting on their default — that is
+// what removes an override, so config.json only ever holds what the user actually
+// changed and a future change to a default reaches anyone who never touched it.
+async function saveTunableSettings() {
+  const values = {};
+  for (const setting of tunableSchema) {
+    const input = el("tunableGroups").querySelector(`.tunable[data-id="${setting.id}"] input`);
+    if (!input) continue;
+    const value = readTunableInput(setting, input);
+    values[setting.id] = isAtDefault(setting, value) ? null : value;
+  }
+
+  const status = el("advancedStatus");
+  setStatus(status, "pending", "Saving…");
+  try {
+    await invoke("save_tunables", { values });
+    // Re-read rather than trusting what was sent: the backend normalizes the
+    // app-name lists, so what is stored isn't always character-for-character
+    // what was typed.
+    await loadTunableSettings();
+    const restarts = tunableSchema.filter((s) => s.restart && values[s.id] !== null);
+    setStatus(
+      status,
+      "ok",
+      restarts.length > 0 ? "Saved — restart the widget to apply the event port." : "Saved."
+    );
+  } catch (err) {
+    setStatus(status, "error", String(err));
+  }
+}
+
+async function resetAllTunables() {
+  const status = el("advancedStatus");
+  setStatus(status, "pending", "Resetting…");
+  try {
+    await invoke("save_tunables", {
+      values: Object.fromEntries(tunableSchema.map((s) => [s.id, null])),
+    });
+    await loadTunableSettings();
+    setStatus(status, "ok", "Everything is back to its default.");
+  } catch (err) {
+    setStatus(status, "error", String(err));
+  }
+}
+
 // ---------- shared ----------
 
 window.addEventListener("DOMContentLoaded", async () => {
@@ -577,6 +793,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   sttSection.load();
   ttsSection.load();
   loadVoiceSettings();
+  loadTunableSettings().catch((err) => setStatus(el("advancedStatus"), "error", String(err)));
   const token = await loadGithubConfig();
   if (token) refreshReport();
 
@@ -620,6 +837,9 @@ window.addEventListener("DOMContentLoaded", async () => {
   el("voiceThreshold").addEventListener("change", (e) => {
     invoke("set_voice_threshold", { threshold: Number(e.target.value) });
   });
+
+  el("advancedSaveBtn").addEventListener("click", saveTunableSettings);
+  el("advancedResetBtn").addEventListener("click", resetAllTunables);
 
   el("titlebar-close").addEventListener("click", () => {
     invoke("hide_settings");

@@ -28,17 +28,16 @@ use serde_json::json;
 
 use crate::config::read_config;
 
-// Long enough for a slow local model on a cold cache, short enough that a
-// wedged server gives the pill its idle face back instead of hanging in
-// "thinking" forever. The reply has no entry here because the streaming path
-// (run_chat_stream) carries its own timeout.
-const STT_TIMEOUT_SECS: u64 = 60;
-const TTS_TIMEOUT_SECS: u64 = 60;
-
+// The speech-server timeouts (tunables.rs) default to long enough for a slow
+// local model on a cold cache, and short enough that a wedged server gives the
+// pill its idle face back instead of hanging in "thinking" forever. The reply
+// has no entry there because the streaming path (run_chat_stream) carries its
+// own timeout.
+//
 // Spoken replies are read aloud start to finish — there is no skimming and no
 // scrollback — so length matters far more here than in the chat window. The
-// prompt below caps it at one end and VOICE_MAX_TOKENS at the other: an
-// instruction the model can follow, and a hard ceiling for when it doesn't.
+// prompt below caps it at one end and the reply-length ceiling at the other: an
+// instruction the model can follow, and a hard limit for when it doesn't.
 //
 // Split into an identity line and the delivery contract so the user's own chat
 // instructions can replace the former without touching the latter — see
@@ -54,14 +53,11 @@ Always reply in the same language the user spoke to you in. \
 The text you receive came from speech recognition and may be garbled: if it does not \
 read like a sensible request, say you did not catch that and ask them to repeat it, \
 rather than answering the words literally.";
-const VOICE_MAX_TOKENS: u32 = 220;
 
-// How much of today's spoken conversation to carry as context. Small on
-// purpose: replies are capped at two sentences, so a handful of exchanges is
-// all a follow-up ever refers to, and every extra token is latency on a reply
-// the user is waiting to hear.
-const VOICE_HISTORY_MESSAGES: usize = 8;
-const VOICE_HISTORY_CHARS: usize = 3000;
+// How much of today's spoken conversation to carry as context is a setting
+// (tunables.rs), defaulting small on purpose: replies are capped at two
+// sentences, so a handful of exchanges is all a follow-up ever refers to, and
+// every extra token is latency on a reply the user is waiting to hear.
 
 // The user's custom instructions (Settings' chat personality) take the place of
 // the generic identity line rather than being appended after it — two competing
@@ -241,9 +237,10 @@ pub fn voice_transcribe(app: tauri::AppHandle, audio_base64: String) -> Result<S
         candidates.insert(0, url);
     }
 
+    let timeout = crate::tunables::secs(&app, crate::tunables::SPEECH_STT_TIMEOUT);
     let mut last_error = None;
     for url in candidates {
-        match post_transcription(&url, &profile, bytes.clone()) {
+        match post_transcription(&url, &profile, bytes.clone(), timeout) {
             Ok(text) => {
                 *STT_ENDPOINT.lock().unwrap() = Some(url);
                 return Ok(clean_transcript(&text));
@@ -271,10 +268,13 @@ enum TranscribeError {
     Other(String),
 }
 
+// Takes the timeout rather than an AppHandle so this stays a plain HTTP
+// function, testable and free of Tauri.
 fn post_transcription(
     url: &str,
     profile: &crate::config::SttProfile,
     bytes: Vec<u8>,
+    timeout: std::time::Duration,
 ) -> Result<String, TranscribeError> {
     let part = reqwest::blocking::multipart::Part::bytes(bytes)
         // whisper.cpp's server picks its decoder from the filename extension
@@ -299,7 +299,7 @@ fn post_transcription(
 
     let mut req = reqwest::blocking::Client::new()
         .post(url)
-        .timeout(std::time::Duration::from_secs(STT_TIMEOUT_SECS))
+        .timeout(timeout)
         .multipart(form);
     if !profile.api_key.trim().is_empty() {
         req = req.bearer_auth(&profile.api_key);
@@ -356,6 +356,10 @@ fn clean_transcript(raw: &str) -> String {
 // guarded against explicitly.
 struct SentenceSplitter {
     buf: String,
+    // Carried per splitter rather than read from the config here, so this stays
+    // a pure function of its input — the tests pin an explicit value instead of
+    // moving whenever the product default does.
+    min_chars: usize,
 }
 
 // Below this, a sentence rides along with whatever follows instead of becoming
@@ -375,14 +379,23 @@ struct SentenceSplitter {
 // This number is therefore a property of the speech server's throughput, not of
 // language: a faster one lowers it, and if voice ever runs against a
 // substantially different server this is the thing to re-derive.
-const MIN_SENTENCE_CHARS: usize = 100;
 // A model that never emits a terminator (a long run-on, or a list it was told
 // not to produce) must still start speaking rather than buffering to the end.
-const MAX_SENTENCE_CHARS: usize = 220;
+// Never below twice the minimum: a run-on flush point under the minimum can
+// never fire (see find_boundary's word-boundary filter), which would silently
+// turn a raised minimum into "buffer the whole reply".
+const RUNON_FLUSH_CHARS: usize = 220;
 
 impl SentenceSplitter {
-    fn new() -> Self {
-        Self { buf: String::new() }
+    fn new(min_chars: usize) -> Self {
+        Self {
+            buf: String::new(),
+            min_chars,
+        }
+    }
+
+    fn runon_flush_at(&self) -> usize {
+        RUNON_FLUSH_CHARS.max(self.min_chars * 2)
     }
 
     /// Feeds one streamed delta, returning any sentences it completed.
@@ -416,7 +429,7 @@ impl SentenceSplitter {
                 continue;
             }
             let end = idx + ch.len_utf8();
-            if end < MIN_SENTENCE_CHARS {
+            if end < self.min_chars {
                 continue;
             }
             // A '.' between two digits is a decimal point ("3.5"), not an end.
@@ -449,8 +462,8 @@ impl SentenceSplitter {
         }
         // No terminator, but too much buffered to keep waiting — break at the
         // last word boundary so a word is never cut in half.
-        if self.buf.len() > MAX_SENTENCE_CHARS {
-            return self.buf.rfind(char::is_whitespace).filter(|i| *i >= MIN_SENTENCE_CHARS);
+        if self.buf.len() > self.runon_flush_at() {
+            return self.buf.rfind(char::is_whitespace).filter(|i| *i >= self.min_chars);
         }
         None
     }
@@ -486,7 +499,12 @@ pub fn voice_reply_stream(window: tauri::Window, app: tauri::AppHandle, turn_id:
         role: "system".to_string(),
         content: json!(build_system_prompt(&instructions)),
     }];
-    for past in crate::ai::chat::recent_voice_turns(&app, VOICE_HISTORY_MESSAGES, VOICE_HISTORY_CHARS) {
+    let history = crate::ai::chat::recent_voice_turns(
+        &app,
+        crate::tunables::int(&app, crate::tunables::VOICE_HISTORY_MESSAGES) as usize,
+        crate::tunables::int(&app, crate::tunables::VOICE_HISTORY_CHARS) as usize,
+    );
+    for past in history {
         messages.push(crate::ai::llm::ChatTurn {
             role: past.role,
             content: json!(past.content),
@@ -497,7 +515,9 @@ pub fn voice_reply_stream(window: tauri::Window, app: tauri::AppHandle, turn_id:
         content: json!(transcript.trim()),
     });
 
-    let mut splitter = SentenceSplitter::new();
+    let mut splitter = SentenceSplitter::new(
+        crate::tunables::int(&app, crate::tunables::SPEECH_MIN_SENTENCE_CHARS) as usize,
+    );
     let mut index = 0usize;
     let result = crate::ai::llm::run_chat_stream(
         &profile.base_url,
@@ -505,7 +525,7 @@ pub fn voice_reply_stream(window: tauri::Window, app: tauri::AppHandle, turn_id:
         &profile.api_key,
         &messages,
         profile.think,
-        VOICE_MAX_TOKENS,
+        crate::tunables::int(&app, crate::tunables::VOICE_MAX_TOKENS) as u32,
         &mut |delta| {
             for sentence in splitter.push(delta) {
                 let _ = window.emit(
@@ -564,7 +584,7 @@ pub fn voice_speak(app: tauri::AppHandle, text: String) -> Result<VoiceAudio, St
 
     let mut req = reqwest::blocking::Client::new()
         .post(&url)
-        .timeout(std::time::Duration::from_secs(TTS_TIMEOUT_SECS))
+        .timeout(crate::tunables::secs(&app, crate::tunables::SPEECH_TTS_TIMEOUT))
         .json(&payload);
     if !profile.api_key.trim().is_empty() {
         req = req.bearer_auth(&profile.api_key);
@@ -605,10 +625,16 @@ pub fn voice_speak(app: tauri::AppHandle, text: String) -> Result<VoiceAudio, St
 mod tests {
     use super::{api_base, build_system_prompt, clean_transcript, transcribe_endpoints, SentenceSplitter};
 
+    // The minimum the fixtures below were written against. Pinned rather than
+    // read from the settings default so these tests keep testing the splitter's
+    // boundary rules, instead of turning into a test of whatever the product
+    // default happens to be.
+    const TEST_MIN_CHARS: usize = 100;
+
     // Feeds text one character at a time, which is the worst case a token stream
     // can present: every boundary check runs with the buffer cut mid-word.
     fn split_char_by_char(text: &str) -> Vec<String> {
-        let mut sp = SentenceSplitter::new();
+        let mut sp = SentenceSplitter::new(TEST_MIN_CHARS);
         let mut out = Vec::new();
         for ch in text.chars() {
             out.extend(sp.push(&ch.to_string()));
@@ -631,10 +657,29 @@ mod tests {
     #[test]
     fn merges_a_short_leading_sentence_into_the_next() {
         // Splitting here would buy a fragment too brief to cover the next
-        // chunk's synthesis, which the listener hears as a stall — see
-        // MIN_SENTENCE_CHARS.
+        // chunk's synthesis, which the listener hears as a stall — see the
+        // minimum-chunk setting in tunables.rs.
         let out = split_char_by_char("Sure. I will run the tests and tell you what breaks.");
         assert_eq!(out, vec!["Sure. I will run the tests and tell you what breaks."]);
+    }
+
+    // The run-on flush point has to stay above the minimum. A fixed 220 would
+    // mean a user-raised minimum could never produce a boundary at all (see
+    // find_boundary's word-boundary filter), silently turning "longer chunks"
+    // into "buffer the entire reply and speak it as one block".
+    #[test]
+    fn the_run_on_flush_point_stays_above_the_minimum() {
+        assert_eq!(SentenceSplitter::new(TEST_MIN_CHARS).runon_flush_at(), 220);
+        assert_eq!(SentenceSplitter::new(300).runon_flush_at(), 600);
+    }
+
+    #[test]
+    fn a_raised_minimum_still_flushes_a_run_on() {
+        let run_on = "and then ".repeat(80); // 720 characters, no terminator anywhere
+        let mut sp = SentenceSplitter::new(300);
+        let out = sp.push(&run_on);
+        assert!(!out.is_empty(), "a terminator-free reply never started speaking");
+        assert!(out[0].len() >= 300);
     }
 
     #[test]

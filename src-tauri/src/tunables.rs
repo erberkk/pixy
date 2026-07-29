@@ -1,0 +1,688 @@
+// Every value in the app a user might legitimately need to change on their own
+// machine, in one declarative registry.
+//
+// Why a registry instead of ~30 more fields on AppConfig: each of these is read
+// from exactly one place, and the settings window has to render an input for
+// every one of them. Done by hand that would be four things to keep in sync per
+// number (a config field, a reader, an HTML input, a JS binding) — and the
+// frontend would need its own copy of every default, which is precisely how two
+// copies of a number drift apart. Here the schema below is the only place a
+// tunable is described: the Rust readers, the settings form and the frontend's
+// values all derive from it.
+//
+// What deliberately does NOT belong here: anything that is a property of a file
+// or a protocol rather than of the user's machine. The mel/embedding geometry in
+// mascot/voice/wakeword.js is fixed by the bundled ONNX models, and
+// TERMINAL_POOL in ui/windows.rs is fixed by the window list in
+// tauri.conf.json — exposing either would only hand the user a way to break the
+// app in a way that looks like a bug rather than a setting.
+use std::collections::HashMap;
+use std::sync::{OnceLock, RwLock};
+
+use serde::Serialize;
+use serde_json::Value;
+use tauri::Emitter;
+
+use crate::config::{read_config, write_config};
+
+#[derive(Clone, Copy)]
+pub enum Kind {
+    Int {
+        min: i64,
+        max: i64,
+        default: i64,
+    },
+    Float {
+        min: f64,
+        max: f64,
+        step: f64,
+        default: f64,
+    },
+    /// A comma-separated list of case-insensitive substrings, matched against
+    /// names the OS gives us. A list rather than the regex this replaced: a
+    /// user-supplied regex can fail to compile, and "what do I type here" has a
+    /// much better answer for a list than for a pattern.
+    Names {
+        default: &'static str,
+    },
+}
+
+pub struct Tunable {
+    pub id: &'static str,
+    pub group: &'static str,
+    pub label: &'static str,
+    pub help: &'static str,
+    /// Shown after the input ("ms", "%", …). Empty when the label already says it.
+    pub unit: &'static str,
+    pub kind: Kind,
+    /// True when the running app cannot pick a new value up on its own, so the
+    /// settings form has to say so instead of implying it took effect.
+    pub restart: bool,
+}
+
+// The macro exists for one reason: it emits the `&'static str` id constant and
+// the registry entry from the same literal, so a caller using MIC_SILENCE_TO_END
+// cannot be reading a key that no longer exists in the schema. Referring to
+// tunables by bare string literals would make that a silent
+// wrong-value-at-runtime instead of a compile error.
+macro_rules! tunables {
+    ($(
+        $const_name:ident = $id:literal, $group:literal, $label:literal, $unit:literal,
+        $kind:expr, restart: $restart:literal, $help:literal;
+    )*) => {
+        // Roughly half of these are read only by the frontend, which looks them
+        // up by id in the get_tunables payload rather than through a Rust
+        // constant — so "never used" here means "used from JavaScript", not
+        // "dead". Dropping the unused ones would give the settings form entries
+        // Rust has no name for, which is worse.
+        $( #[allow(dead_code)] pub const $const_name: &str = $id; )*
+
+        pub const TUNABLES: &[Tunable] = &[$(
+            Tunable {
+                id: $id,
+                group: $group,
+                label: $label,
+                unit: $unit,
+                kind: $kind,
+                restart: $restart,
+                help: $help,
+            }
+        ),*];
+    };
+}
+
+tunables! {
+    // --- Network -------------------------------------------------------------
+    EVENT_PORT = "network.event_port", "Network", "Claude Code event port", "",
+        Kind::Int { min: 1024, max: 65535, default: 47623 },
+        restart: true,
+        "The local port Claude Code's hooks post to. Only worth changing if \
+         something else on this machine already uses it — and the hook commands \
+         in your Claude Code settings have to be updated to match.";
+
+    // --- Microphone ----------------------------------------------------------
+    MIC_SPEECH_OVER_FLOOR = "mic.speech_over_floor", "Microphone",
+        "Speech loudness over room noise", "×",
+        Kind::Float { min: 1.2, max: 6.0, step: 0.1, default: 2.5 },
+        restart: false,
+        "How much louder than the measured room noise a sound has to be to count \
+         as speech. Lower it in a quiet room if the assistant cuts you off \
+         mid-sentence; raise it in a noisy one if it never stops recording.";
+
+    MIC_MIN_FLOOR_RMS = "mic.min_floor_rms", "Microphone",
+        "Noise floor lower limit", "",
+        Kind::Float { min: 0.0002, max: 0.02, step: 0.0002, default: 0.002 },
+        restart: false,
+        "The room's noise level is never treated as quieter than this, so in a \
+         near-silent room breathing doesn't get promoted to speech.";
+
+    MIC_SPEECH_TO_START = "mic.speech_to_start_ms", "Microphone",
+        "Speech needed to start", "ms",
+        Kind::Int { min: 40, max: 1000, default: 160 },
+        restart: false,
+        "How much continuous speech has to arrive before recording is treated as \
+         really under way. Rejects a door slam, which is loud but not a sentence.";
+
+    MIC_SILENCE_TO_END = "mic.silence_to_end_ms", "Microphone",
+        "Pause that ends your turn", "ms",
+        Kind::Int { min: 200, max: 3000, default: 900 },
+        restart: false,
+        "Silence this long ends the recording. Raise it if you pause to think \
+         mid-sentence and get cut off; lower it if the assistant feels slow to \
+         start answering.";
+
+    MIC_MIN_UTTERANCE = "mic.min_utterance_ms", "Microphone",
+        "Shortest usable recording", "ms",
+        Kind::Int { min: 100, max: 2000, default: 400 },
+        restart: false,
+        "Anything shorter than this is thrown away rather than transcribed — it \
+         is a cough or a click, not a request.";
+
+    MIC_MAX_UTTERANCE = "mic.max_utterance_ms", "Microphone",
+        "Longest recording", "ms",
+        Kind::Int { min: 3000, max: 60000, default: 15000 },
+        restart: false,
+        "A hard stop, so a microphone that never goes quiet can't record forever.";
+
+    MIC_NO_SPEECH_TIMEOUT = "mic.no_speech_timeout_ms", "Microphone",
+        "Give up if nobody speaks", "ms",
+        Kind::Int { min: 500, max: 10000, default: 2500 },
+        restart: false,
+        "If the wake word fired but no speech follows within this, the turn is \
+         abandoned instead of sitting in recording state.";
+
+    MIC_HOPS_TO_CONFIRM = "mic.hops_to_confirm", "Microphone",
+        "Agreeing frames to accept the wake word", "× 80ms",
+        Kind::Int { min: 1, max: 5, default: 2 },
+        restart: false,
+        "Consecutive 80ms frames that must clear the sensitivity threshold. \
+         Raising it rejects more single-frame false alarms at the cost of a \
+         little delay.";
+
+    MIC_COOLDOWN = "mic.cooldown_ms", "Microphone",
+        "Deaf period after a reply", "ms",
+        Kind::Int { min: 0, max: 10000, default: 1200 },
+        restart: false,
+        "The wake word is ignored for this long after a turn ends. Without it a \
+         reply that happens to contain a wake-word-shaped sound starts a second \
+         turn by itself.";
+
+    // --- Speech servers ------------------------------------------------------
+    SPEECH_MIN_SENTENCE_CHARS = "speech.min_sentence_chars", "Speech servers",
+        "Smallest chunk sent to speak", "characters",
+        Kind::Int { min: 20, max: 400, default: 100 },
+        restart: false,
+        "The reply is spoken in pieces as the model writes it. This is a property \
+         of your speech server's speed, not of language: every request costs a \
+         fixed amount, so chunks shorter than this make the reply slower overall \
+         rather than faster. Lower it only if your server has little fixed cost.";
+
+    SPEECH_SYNTH_CONCURRENCY = "speech.synth_concurrency", "Speech servers",
+        "Sentences synthesized at once", "",
+        Kind::Int { min: 1, max: 8, default: 2 },
+        restart: false,
+        "How many pieces of the reply are sent to the speech server in parallel. \
+         More hides the wait before a later sentence, until the server itself \
+         becomes the bottleneck — 1 turns parallelism off entirely.";
+
+    SPEECH_STT_TIMEOUT = "speech.stt_timeout_secs", "Speech servers",
+        "Transcription timeout", "s",
+        Kind::Int { min: 5, max: 600, default: 60 },
+        restart: false,
+        "How long to wait for the speech-to-text server before giving up.";
+
+    SPEECH_TTS_TIMEOUT = "speech.tts_timeout_secs", "Speech servers",
+        "Speech timeout", "s",
+        Kind::Int { min: 5, max: 600, default: 60 },
+        restart: false,
+        "How long to wait for the text-to-speech server before giving up. Worth \
+         raising on a machine where synthesis runs on the CPU.";
+
+    // --- Spoken replies ------------------------------------------------------
+    VOICE_MAX_TOKENS = "voice.max_tokens", "Spoken replies",
+        "Reply length ceiling", "tokens",
+        Kind::Int { min: 40, max: 2000, default: 220 },
+        restart: false,
+        "A spoken answer is asked to be short; this is the hard limit behind that \
+         request. Raising it lets the assistant ramble at you.";
+
+    VOICE_HISTORY_MESSAGES = "voice.history_messages", "Spoken replies",
+        "Spoken turns remembered", "messages",
+        Kind::Int { min: 0, max: 40, default: 8 },
+        restart: false,
+        "How much of today's spoken conversation is sent back to the model, so \
+         follow-up questions make sense. 0 makes every turn standalone.";
+
+    VOICE_HISTORY_CHARS = "voice.history_chars", "Spoken replies",
+        "Spoken history size limit", "characters",
+        Kind::Int { min: 0, max: 20000, default: 3000 },
+        restart: false,
+        "A second cap on the same history, so a few long turns can't crowd out \
+         the actual question.";
+
+    VOICE_TRANSCRIPT_LINGER = "voice.transcript_linger_ms", "Spoken replies",
+        "Keep the transcript visible", "ms",
+        Kind::Int { min: 500, max: 20000, default: 4000 },
+        restart: false,
+        "How long what you said stays on the widget after the reply finishes. It \
+         is the most useful thing to see when an answer was strange.";
+
+    VOICE_ERROR_NOTICE = "voice.error_notice_ms", "Spoken replies",
+        "Keep errors visible", "ms",
+        Kind::Int { min: 500, max: 30000, default: 6000 },
+        restart: false,
+        "How long a voice error message stays on the widget.";
+
+    // --- Presence ------------------------------------------------------------
+    PRESENCE_POLL = "presence.poll_secs", "Presence",
+        "How often to re-read your state", "s",
+        Kind::Int { min: 1, max: 60, default: 5 },
+        restart: false,
+        "How often the widget checks terminals, audio, battery and idle time to \
+         pick its mood. Lower reacts faster and costs a little more CPU.";
+
+    PRESENCE_BREAK = "presence.break_secs", "Presence",
+        "Idle before \"stepped away\"", "s",
+        Kind::Int { min: 30, max: 3600, default: 240 },
+        restart: false,
+        "No keyboard or mouse for this long and the widget shows a short break \
+         rather than assuming you are still there.";
+
+    PRESENCE_SLEEP = "presence.sleep_secs", "Presence",
+        "Idle before sleeping", "s",
+        Kind::Int { min: 60, max: 14400, default: 900 },
+        restart: false,
+        "The deeper version of the setting above. Keep it longer than the break: \
+         this one is checked first, so setting it lower means the short-break \
+         pose never appears at all.";
+
+    PRESENCE_FORGOTTEN = "presence.forgotten_secs", "Presence",
+        "Unanswered prompt before nagging", "s",
+        Kind::Int { min: 30, max: 7200, default: 300 },
+        restart: false,
+        "How long a Claude Code session can sit waiting on your answer before \
+         the widget stops being polite about it.";
+
+    PRESENCE_LOW_BATTERY = "presence.low_battery_percent", "Presence",
+        "Low battery warning at", "%",
+        Kind::Int { min: 5, max: 50, default: 20 },
+        restart: false,
+        "Battery level below which the widget shows a low-power mood. Ignored on \
+         a desktop.";
+
+    PRESENCE_CALL_APPS = "presence.call_apps", "Presence",
+        "Call apps", "",
+        Kind::Names { default: "teams,zoom,discord,slack" },
+        restart: false,
+        "Comma-separated. Any app whose name contains one of these counts as a \
+         call when it is making sound. Browser-based calls are usually detected \
+         without this — the list is the fallback for when the microphone is \
+         already in use by the wake word.";
+
+    PRESENCE_STREAM_APPS = "presence.stream_apps", "Presence",
+        "Streaming apps", "",
+        Kind::Names { default: "obs" },
+        restart: false,
+        "Comma-separated, same matching as above — these put the widget in its \
+         streaming mood instead.";
+
+    // --- GitHub --------------------------------------------------------------
+    GITHUB_DIGEST_HOUR = "github.digest_hour", "GitHub",
+        "Daily digest after", "o'clock",
+        Kind::Int { min: 0, max: 23, default: 9 },
+        restart: false,
+        "Local hour the once-a-day summary of your issues and pull requests is \
+         allowed to run.";
+
+    GITHUB_ISSUE_POLL = "github.issue_poll_secs", "GitHub",
+        "Check GitHub every", "s",
+        Kind::Int { min: 30, max: 3600, default: 90 },
+        restart: false,
+        "How often assigned issues and review requests are polled. Lower means \
+         faster notifications and more of your API rate limit.";
+
+    GITHUB_STALE_DAYS = "github.stale_days", "GitHub",
+        "Call a pull request stale after", "days",
+        Kind::Int { min: 1, max: 365, default: 30 },
+        restart: false,
+        "Age at which one of your open pull requests is flagged as stale in the \
+         digest.";
+
+    GITHUB_MERGE_FRESHNESS = "github.merge_freshness_minutes", "GitHub",
+        "Only celebrate merges from the last", "min",
+        Kind::Int { min: 1, max: 1440, default: 10 },
+        restart: false,
+        "Merges older than this are ignored, so restarting the widget doesn't \
+         replay a week of them at you.";
+
+    GITHUB_ISSUE_FRESHNESS = "github.issue_freshness_minutes", "GitHub",
+        "Only announce issue activity from the last", "min",
+        Kind::Int { min: 1, max: 1440, default: 10 },
+        restart: false,
+        "The same guard for assignments and comments.";
+}
+
+fn spec(id: &str) -> &'static Tunable {
+    TUNABLES
+        .iter()
+        .find(|t| t.id == id)
+        // Unreachable via the id constants above, which is the whole point of
+        // generating them from the same literal as the entry.
+        .expect("tunable id must exist in TUNABLES")
+}
+
+// Overrides are cached because some of these are read on paths that run often
+// (the presence poll, every streamed reply chunk), and re-reading config.json
+// from disk for a single number would be absurd. Invalidated on save, which is
+// the only thing that can change them.
+fn cache() -> &'static RwLock<Option<HashMap<String, Value>>> {
+    static CACHE: OnceLock<RwLock<Option<HashMap<String, Value>>>> = OnceLock::new();
+    CACHE.get_or_init(|| RwLock::new(None))
+}
+
+fn override_value(app: &tauri::AppHandle, id: &str) -> Option<Value> {
+    if let Ok(guard) = cache().read() {
+        if let Some(map) = guard.as_ref() {
+            return map.get(id).cloned();
+        }
+    }
+    let map = read_config(app).tunables;
+    let found = map.get(id).cloned();
+    if let Ok(mut guard) = cache().write() {
+        if guard.is_none() {
+            *guard = Some(map);
+        }
+    }
+    found
+}
+
+pub fn int(app: &tauri::AppHandle, id: &str) -> i64 {
+    let spec = spec(id);
+    let default = match spec.kind {
+        Kind::Int { default, .. } => default,
+        _ => 0,
+    };
+    override_value(app, id)
+        .and_then(|v| v.as_i64())
+        .unwrap_or(default)
+}
+
+/// Convenience for the many durations stored in seconds and used as a Duration.
+pub fn secs(app: &tauri::AppHandle, id: &str) -> std::time::Duration {
+    std::time::Duration::from_secs(int(app, id).max(0) as u64)
+}
+
+// There are deliberately no `float`/`names` readers here yet: every tunable of
+// those two kinds is currently read by the frontend, which takes its values from
+// the get_tunables payload. Both kinds are fully described and validated below,
+// so adding a reader is a few lines the day Rust first needs one — but an unused
+// one today is just dead code.
+
+/// Splits a `Names` value into lowercase substrings, dropping empties so a stray
+/// trailing comma can't produce a pattern that matches everything.
+fn split_names(raw: &str) -> Vec<String> {
+    raw.split(',')
+        .map(|part| part.trim().to_lowercase())
+        .filter(|part| !part.is_empty())
+        .collect()
+}
+
+// --- the settings window's side ---------------------------------------------
+
+#[derive(Serialize)]
+pub struct TunableInfo {
+    id: &'static str,
+    group: &'static str,
+    label: &'static str,
+    help: &'static str,
+    unit: &'static str,
+    kind: &'static str,
+    min: Option<f64>,
+    max: Option<f64>,
+    step: Option<f64>,
+    default: Value,
+    restart: bool,
+}
+
+#[derive(Serialize)]
+pub struct TunablesPayload {
+    /// Group names in declaration order — the settings form renders sections in
+    /// this order rather than inventing one of its own.
+    groups: Vec<&'static str>,
+    settings: Vec<TunableInfo>,
+    /// Effective values (default merged with the user's override) keyed by id.
+    /// The frontend reads these and therefore never carries its own defaults.
+    values: HashMap<&'static str, Value>,
+    /// Ids the user has actually changed, so the form can mark them and offer a
+    /// reset without having to compare floats itself.
+    overridden: Vec<&'static str>,
+}
+
+fn default_value(kind: &Kind) -> Value {
+    match *kind {
+        Kind::Int { default, .. } => Value::from(default),
+        Kind::Float { default, .. } => Value::from(default),
+        Kind::Names { default } => Value::from(default),
+    }
+}
+
+#[tauri::command]
+pub fn get_tunables(app: tauri::AppHandle) -> TunablesPayload {
+    let overrides = read_config(&app).tunables;
+
+    let mut groups: Vec<&'static str> = Vec::new();
+    for tunable in TUNABLES {
+        if !groups.contains(&tunable.group) {
+            groups.push(tunable.group);
+        }
+    }
+
+    let settings = TUNABLES
+        .iter()
+        .map(|t| {
+            let (kind, min, max, step) = match t.kind {
+                Kind::Int { min, max, .. } => ("int", Some(min as f64), Some(max as f64), Some(1.0)),
+                Kind::Float {
+                    min, max, step, ..
+                } => ("float", Some(min), Some(max), Some(step)),
+                Kind::Names { .. } => ("names", None, None, None),
+            };
+            TunableInfo {
+                id: t.id,
+                group: t.group,
+                label: t.label,
+                help: t.help,
+                unit: t.unit,
+                kind,
+                min,
+                max,
+                step,
+                default: default_value(&t.kind),
+                restart: t.restart,
+            }
+        })
+        .collect();
+
+    let mut values = HashMap::new();
+    let mut overridden = Vec::new();
+    for tunable in TUNABLES {
+        match overrides.get(tunable.id) {
+            Some(value) => {
+                overridden.push(tunable.id);
+                values.insert(tunable.id, value.clone());
+            }
+            None => {
+                values.insert(tunable.id, default_value(&tunable.kind));
+            }
+        }
+    }
+
+    TunablesPayload {
+        groups,
+        settings,
+        values,
+        overridden,
+    }
+}
+
+/// Validates a single incoming value against its schema entry, returning the
+/// normalized value to store. Kept separate from the command so it is testable
+/// without an AppHandle.
+fn validate(tunable: &Tunable, value: &Value) -> Result<Value, String> {
+    match tunable.kind {
+        Kind::Int { min, max, .. } => {
+            // as_i64 alone rejects 5.0, which is what a number input in the
+            // webview produces for an integer field.
+            let number = value
+                .as_i64()
+                .or_else(|| value.as_f64().filter(|f| f.fract() == 0.0).map(|f| f as i64))
+                .ok_or_else(|| format!("{} needs a whole number.", tunable.label))?;
+            if number < min || number > max {
+                return Err(format!(
+                    "{} has to be between {min} and {max}.",
+                    tunable.label
+                ));
+            }
+            Ok(Value::from(number))
+        }
+        Kind::Float { min, max, .. } => {
+            let number = value
+                .as_f64()
+                .filter(|f| f.is_finite())
+                .ok_or_else(|| format!("{} needs a number.", tunable.label))?;
+            if number < min || number > max {
+                return Err(format!(
+                    "{} has to be between {min} and {max}.",
+                    tunable.label
+                ));
+            }
+            Ok(Value::from(number))
+        }
+        Kind::Names { .. } => {
+            let text = value
+                .as_str()
+                .ok_or_else(|| format!("{} needs a comma-separated list.", tunable.label))?;
+            // Stored normalized so what the user typed and what the matching
+            // actually uses can't diverge.
+            Ok(Value::from(split_names(text).join(",")))
+        }
+    }
+}
+
+/// Saves the given values. A null value removes the override, putting that
+/// setting back on its compiled default — which is also why absent-means-default
+/// is the storage rule: resetting leaves no trace in config.json instead of
+/// writing the default out as if the user had chosen it.
+#[tauri::command]
+pub fn save_tunables(app: tauri::AppHandle, values: HashMap<String, Value>) -> Result<(), String> {
+    let mut validated: Vec<(String, Option<Value>)> = Vec::new();
+    for (id, value) in &values {
+        let tunable = TUNABLES
+            .iter()
+            .find(|t| t.id == id.as_str())
+            .ok_or_else(|| format!("Unknown setting: {id}"))?;
+        if value.is_null() {
+            validated.push((id.clone(), None));
+        } else {
+            validated.push((id.clone(), Some(validate(tunable, value)?)));
+        }
+    }
+
+    // Nothing is written until every value passed, so a form with one bad field
+    // doesn't half-apply.
+    let mut cfg = read_config(&app);
+    for (id, value) in validated {
+        match value {
+            Some(value) => {
+                cfg.tunables.insert(id, value);
+            }
+            None => {
+                cfg.tunables.remove(&id);
+            }
+        }
+    }
+    write_config(&app, &cfg);
+
+    if let Ok(mut guard) = cache().write() {
+        *guard = Some(cfg.tunables.clone());
+    }
+    // The mascot window holds its own copy of these; it reloads on this rather
+    // than polling the config.
+    let _ = app.emit("tunables-changed", ());
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ids_are_unique() {
+        let mut seen = std::collections::HashSet::new();
+        for tunable in TUNABLES {
+            assert!(seen.insert(tunable.id), "duplicate tunable id {}", tunable.id);
+        }
+    }
+
+    #[test]
+    fn every_default_is_inside_its_own_range() {
+        for tunable in TUNABLES {
+            match tunable.kind {
+                Kind::Int { min, max, default } => {
+                    assert!(min <= max, "{}: min above max", tunable.id);
+                    assert!(
+                        (min..=max).contains(&default),
+                        "{}: default {default} outside {min}..{max}",
+                        tunable.id
+                    );
+                }
+                Kind::Float {
+                    min,
+                    max,
+                    step,
+                    default,
+                } => {
+                    assert!(min <= max, "{}: min above max", tunable.id);
+                    assert!(step > 0.0, "{}: step must be positive", tunable.id);
+                    assert!(
+                        default >= min && default <= max,
+                        "{}: default {default} outside {min}..{max}",
+                        tunable.id
+                    );
+                }
+                Kind::Names { default } => {
+                    assert!(
+                        !split_names(default).is_empty(),
+                        "{}: default list is empty",
+                        tunable.id
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn every_tunable_is_described() {
+        for tunable in TUNABLES {
+            assert!(!tunable.label.is_empty(), "{}: no label", tunable.id);
+            // The help text is what makes the difference between a settings form
+            // and a wall of numbers, so an entry without one is a mistake.
+            assert!(tunable.help.len() > 30, "{}: help too thin", tunable.id);
+            assert!(
+                tunable.id.contains('.'),
+                "{}: ids are group-prefixed",
+                tunable.id
+            );
+        }
+    }
+
+    // Guards the one ordering relationship in the registry that a user can get
+    // wrong from the form: a sleep threshold below the break threshold means the
+    // widget can never reach the sleeping state.
+    #[test]
+    fn sleep_default_is_longer_than_break_default() {
+        let value = |id: &str| match spec(id).kind {
+            Kind::Int { default, .. } => default,
+            _ => panic!("expected an int"),
+        };
+        assert!(value(PRESENCE_SLEEP) > value(PRESENCE_BREAK));
+    }
+
+    #[test]
+    fn int_validation_rejects_out_of_range_and_accepts_whole_floats() {
+        let port = spec(EVENT_PORT);
+        assert!(validate(port, &Value::from(80)).is_err());
+        assert!(validate(port, &Value::from(8080)).is_ok());
+        assert!(validate(port, &Value::from(70000)).is_err());
+        // A webview number input yields 8080.0, not 8080.
+        assert_eq!(validate(port, &Value::from(8080.0)).unwrap(), Value::from(8080));
+        assert!(validate(port, &Value::from(8080.5)).is_err());
+        assert!(validate(port, &Value::from("8080")).is_err());
+    }
+
+    #[test]
+    fn float_validation_rejects_non_finite() {
+        let floor = spec(MIC_SPEECH_OVER_FLOOR);
+        assert!(validate(floor, &Value::from(2.5)).is_ok());
+        assert!(validate(floor, &Value::from(0.5)).is_err());
+        assert!(serde_json::from_str::<Value>("1e999")
+            .map(|v| validate(floor, &v).is_err())
+            .unwrap_or(true));
+    }
+
+    #[test]
+    fn names_are_stored_normalized() {
+        let apps = spec(PRESENCE_CALL_APPS);
+        assert_eq!(
+            validate(apps, &Value::from("Teams, ZOOM ,, jitsi,")).unwrap(),
+            Value::from("teams,zoom,jitsi")
+        );
+        assert!(validate(apps, &Value::from(3)).is_err());
+    }
+
+    #[test]
+    fn splitting_names_drops_empties() {
+        assert_eq!(split_names(" A , ,b,"), vec!["a".to_string(), "b".to_string()]);
+        assert!(split_names(" , ").is_empty());
+    }
+}

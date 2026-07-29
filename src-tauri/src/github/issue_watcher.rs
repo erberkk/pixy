@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -8,14 +7,6 @@ use tauri::{Emitter, Manager};
 
 use crate::config::read_config;
 use crate::github::{fetch_username, minutes_since, search_issues, GithubItem, USER_AGENT};
-
-// Mirrors github/api.rs's MERGE_FRESHNESS_MINUTES — a brand-new issue can be
-// created AND self-assigned (or created already closed) in one action, so
-// the very first time this watcher ever sees it, there's no "before"
-// snapshot to diff against. Without this, that assignment/close would
-// silently never notify, the same failure mode the merge watcher's
-// freshness fallback exists to avoid.
-const ISSUE_FRESHNESS_MINUTES: i64 = 10;
 
 // Separate from github/api.rs's merge watcher (same polling pattern, different
 // concern: issue lifecycle rather than "did one of my PRs get merged") so
@@ -140,6 +131,13 @@ fn poll_for_issue_updates(app: &tauri::AppHandle) {
         }
     };
 
+    // The issue-freshness counterpart to the merge watcher's window: a
+    // brand-new issue can be created AND self-assigned (or created already
+    // closed) in one action, so the very first time this watcher sees it there
+    // is no "before" snapshot to diff against. Without a freshness allowance
+    // that assignment/close would silently never notify.
+    let freshness_minutes = crate::tunables::int(app, crate::tunables::GITHUB_ISSUE_FRESHNESS);
+
     let mut cache = read_issue_cache(app);
     for item in &involved {
         let key = item_key(item);
@@ -150,13 +148,10 @@ fn poll_for_issue_updates(app: &tauri::AppHandle) {
         // its baseline and move on (without this, every issue the user is
         // already involved in at first launch would fire a notification the
         // moment the watcher starts, which isn't "new" from the user's
-        // perspective). EXCEPT when the issue itself is very recent
-        // (ISSUE_FRESHNESS_MINUTES) — creating an issue and self-assigning
-        // (or self-closing) it in one action means the very first poll
-        // already sees the "after" state with nothing to diff against, so
-        // that combination would otherwise silently never notify.
+        // perspective). EXCEPT when the issue itself is very recent — see the
+        // freshness window computed above.
         let Some(prior) = prior else {
-            let is_fresh = minutes_since(&item.updated_at).map(|m| m <= ISSUE_FRESHNESS_MINUTES).unwrap_or(false);
+            let is_fresh = minutes_since(&item.updated_at).map(|m| m <= freshness_minutes).unwrap_or(false);
             if is_fresh && is_assigned_now {
                 append_debug_log(app, &format!("issue-watcher: {key} newly assigned to you (fresh, unseen before)"));
                 let _ = app.emit(
@@ -247,15 +242,16 @@ fn poll_for_issue_updates(app: &tauri::AppHandle) {
 // completes BETWEEN two polls is invisible by construction — e.g. close
 // then reopen an issue within one interval, and the poll right after only
 // ever sees "open" both before and after, with nothing to diff against.
-// 90s (vs. the merge watcher's 300s) shrinks that blind window without
-// meaningfully touching the GitHub API rate limit — at ~3 requests/poll
+// The default 90s (vs. the merge watcher's 300s) shrinks that blind window
+// without meaningfully touching the GitHub API rate limit — at ~3 requests/poll
 // this is still only ~120 requests/hour, well under the 5000/hour cap for
-// an authenticated token.
-const POLL_INTERVAL_SECS: u64 = 90;
-
+// an authenticated token. Lowering it in Settings trades rate limit for a
+// smaller blind window.
 pub fn start_issue_watcher(app: tauri::AppHandle) {
     std::thread::spawn(move || loop {
         poll_for_issue_updates(&app);
-        std::thread::sleep(Duration::from_secs(POLL_INTERVAL_SECS));
+        // Re-read each iteration so a change applies from the next poll on,
+        // rather than being latched for as long as the app runs.
+        std::thread::sleep(crate::tunables::secs(&app, crate::tunables::GITHUB_ISSUE_POLL));
     });
 }

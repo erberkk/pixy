@@ -104,13 +104,9 @@ So `/decide`'s HTTP request is held open — not responded to immediately —
 for as long as it takes the human to click Approve/Deny (or, for
 `AskUserQuestion`, pick option chips and hit Submit) in the mascot. Claude
 Code itself blocks the tool call on that response, so approving/denying from
-the widget IS the decision; `agent/terminal.rs` no longer writes `"1"` or any
-other digit into the terminal's PTY for this at all — that entire mechanism
-(`highest_numbered_option`, `wait_for_prompt_visible`, `write_keys`) was
-deleted. The PTY is now purely a rendering surface for whatever the user
-types themselves; `WIDGET_TERMINAL_LABEL` is used only to flag *which*
-terminal's "show all agents" row should show a pending dot, not to route any
-keystroke.
+the widget IS the decision. No keystroke is written anywhere — the mechanism
+that used to type digits into a PTY (`highest_numbered_option`,
+`wait_for_prompt_visible`, `write_keys`) is gone, and so is the PTY.
 
 **Because the timeout must span the human, not the network.** Holding the
 hook's HTTP connection open for potentially minutes (however long the
@@ -131,23 +127,31 @@ matching AgentGlance's own answer contract, since Claude Code doesn't
 document this specific shape itself. No keystrokes here either.
 
 **What stayed the same:** `tool_name`/`tool_input` are still real, structured
-data parsed straight from the hook payload (not text scraped off the
-rendered terminal screen), and `label` still identifies which pooled
-terminal window the session is running in (see `WIDGET_TERMINAL_LABEL`
-below) so the permission card can say e.g. "Terminal 2" instead of a bare
-generic notice. This app is still Claude Code only — no Codex/Cursor/
+data parsed straight from the hook payload, not text scraped off a rendered
+terminal screen. This app is still Claude Code only — no Codex/Cursor/
 Antigravity support.
 
-**`WIDGET_TERMINAL_LABEL` correlates a hook event to a terminal window.**
-`agent/terminal.rs` sets this env var when it spawns each pooled terminal's shell
-(`"terminal"`, `"terminal2"`, ...) — it's inherited down the process tree
-(shell → `claude` → the hook's own child process), so the hook command above
-can read it straight back via `$WIDGET_TERMINAL_LABEL` with no IPC needed to
-establish the mapping. If it's unset (e.g. Claude Code running outside one
-of this app's pooled terminals), the card still renders — it just says
-"External session" instead of "Terminal 2" and there's no terminal window to
-focus or flag a pending dot on; the decision itself still resolves the same
-way regardless.
+**The app no longer runs terminals of its own.** It used to keep a pool of
+sixteen PTY-backed windows so it could watch Claude by reading what they
+rendered, and `WIDGET_TERMINAL_LABEL` (set per pooled shell, inherited down to
+the hook's own child process) told it which window a hook came from. The hooks
+made the watching unnecessary, and they fire wherever you actually run Claude —
+so the pool was spending sixteen `cmd.exe` and sixteen `conhost.exe` at every
+launch to support a case that no longer existed, and closing one of its windows
+could take the widget with it.
+
+That removal fixed a bug rather than causing one. "Somebody is waiting on you"
+was a flag on one of *our* sessions, keyed by that label — so running Claude in
+your own terminal showed the permission card but never moved the mascot into its
+`waiting`/`forgotten` pose, because there was no session of ours to flag. It is
+now counted straight from the held-open requests (`pending_permissions` in
+`agent/server.rs`), which works for any terminal.
+
+`?label=` in the `/decide` URL is now optional and purely cosmetic — whatever it
+contains captions the card, and an absent one just reads "Claude Code". Leaving
+`$WIDGET_TERMINAL_LABEL` in your hook command is harmless: it expands to
+nothing. What genuinely went away is "click a session to focus its window",
+which is not answerable for a terminal this app didn't launch.
 
 **`PreToolUse`/`PermissionDenied` are about ambient mood, not the permission
 card.** The permission card itself never needs a safety timeout anymore — it
@@ -206,10 +210,11 @@ curl -X POST http://127.0.0.1:47623/event -d "{\"state\":\"thinking\"}"
 # response body is Claude Code's own decision JSON, printed once you answer:
 curl -X POST http://127.0.0.1:47623/decide -d "{\"tool_name\":\"Bash\"}"
 
-# Rich per-terminal card — label must match an actually-open pooled terminal
-# window ("terminal", "terminal2", ...) to see it, and to see the request
-# clear that terminal's pending flag in "show all agents" once answered:
-curl -X POST "http://127.0.0.1:47623/decide?label=terminal" \
+# Rich card. `label` is optional and cosmetic — whatever you pass captions the
+# card; omit it and it reads "Claude Code". Either way the mascot goes to its
+# "waiting" pose while this sits open, and "forgotten" once it has waited longer
+# than the threshold in Settings > Advanced:
+curl -X POST "http://127.0.0.1:47623/decide?label=my-shell" \
   -d "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"ls -la\"}}"
 
 # AskUserQuestion — renders as tappable option chips instead of Approve/Deny;
@@ -278,9 +283,20 @@ up again after future changes:
 
 ## Notes
 
-- The port (`47623`) is currently hardcoded in `src-tauri/src/lib.rs`. Change
-  it there and in the hooks above together if it conflicts with something
-  else on your machine.
+- The port (`47623`) is a setting: **Settings → Advanced → Claude Code event
+  port**. Only worth changing if something else on your machine already uses
+  it. Two things to know when you do: the widget has to be restarted (the
+  socket is bound at launch), and the hook commands above have to be updated
+  to the new port by hand — nothing here can edit your Claude Code settings
+  for you. The Advanced section spells the new URLs out next to the field.
+  If the port is already taken, the widget logs the failure to stderr and the
+  hooks simply do nothing, so check there first if the mascot stops reacting.
+- Everything else in **Settings → Advanced** is the same kind of value: it
+  depends on your machine rather than on the widget (room noise, speech-server
+  speed, how long away from the keyboard counts as away). The defaults and the
+  explanation of what each one trades off live in one place,
+  `src-tauri/src/tunables.rs`; the form is generated from it, and the frontend
+  reads its values from there too, so there is no second copy to keep in sync.
 - This app is Claude Code only by design now — the terminal-screen-scraping
   approach that used to also (best-effort) support Codex/Cursor/Antigravity
   has been removed in favor of Claude Code's own hook system, which those

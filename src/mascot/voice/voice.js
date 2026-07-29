@@ -11,6 +11,7 @@
 // because re-opening the device per turn loses the first fraction of a second
 // of speech and re-asks the OS for the mic each time.
 import { invoke, listen } from "../../shared/tauri.js";
+import { loadTunables, t } from "../../shared/tunables.js";
 import { pushEvent, clearEvent } from "../pip/pipstate.js";
 import { showTransientNotice } from "../notice/notice.js";
 import { beep } from "../lib/sound.js";
@@ -18,19 +19,10 @@ import { closeMic, isOpen, onHop, openMic } from "./mic.js";
 import { observeIdleHop, startRecording } from "./recorder.js";
 import { feed, initWakeWord, resetBuffers } from "./wakeword.js";
 
-// Consecutive hops that must clear the threshold before the wake word counts as
-// heard. One hop is 80ms, so two is a 160ms agreement — enough to reject the
-// single-frame spikes that any keyword model produces on transient noise
-// (a cough, a keyboard, a door), without adding latency a person would notice.
-const HOPS_TO_CONFIRM = 2;
-// After a turn ends, ignore the wake word for this long. The reply is still
-// decaying in the room and echo cancellation is not perfect, so without this a
-// reply containing anything wake-word-shaped can start a second turn by itself.
-const COOLDOWN_MS = 1200;
-const ERROR_NOTICE_MS = 6000;
-// How long the transcript stays on the pill after a turn completes.
-const TRANSCRIPT_LINGER_MS = 4000;
-
+// The timings this module reads (agreeing hops before a wake counts, the deaf
+// period after a reply, how long a transcript or an error stays up) are all
+// settings — see src-tauri/src/tunables.rs for what each one trades off.
+//
 // `idle` here means "listening for the wake word" — the assistant is on, it just
 // isn't in a turn. `off` is the only state in which the microphone is closed.
 let phase = "off";
@@ -61,7 +53,7 @@ function chirpGiveUp() {
 
 function showVoiceError(message) {
   clearEvent();
-  showTransientNotice("state-voice_error", message, ERROR_NOTICE_MS);
+  showTransientNotice("state-voice_error", message, t("voice.error_notice_ms"));
 }
 
 /** Starts listening for the wake word. Safe to call when already running. */
@@ -137,7 +129,7 @@ async function scoreHop(hop) {
     return;
   }
   confirmedHops++;
-  if (confirmedHops < HOPS_TO_CONFIRM) return;
+  if (confirmedHops < t("mic.hops_to_confirm")) return;
   confirmedHops = 0;
   runTurn();
 }
@@ -186,7 +178,7 @@ async function runTurn() {
     // The transcript stays up briefly after the audio ends so there is a record
     // of what it thought you said — the most common thing to get wrong, and
     // otherwise invisible once the sound has stopped.
-    pushEvent("speaking", TRANSCRIPT_LINGER_MS, { title: "You said", sub: truncate(transcript) });
+    pushEvent("speaking", t("voice.transcript_linger_ms"), { title: "You said", sub: truncate(transcript) });
     endTurn({ keepEvent: true });
   } catch (err) {
     if (phase === "off") return;
@@ -211,17 +203,19 @@ async function runTurn() {
 // gap mid-reply. Starting it early is what closes that gap.
 //
 // Bounded because the concurrency gain flattens out and an unbounded fan-out
-// would only thrash what is already the slowest link in the turn.
-const SYNTH_CONCURRENCY = 2;
-
+// would only thrash what is already the slowest link in the turn. How far it is
+// worth going is a property of the user's speech server, so it is a setting.
 function speakStreamingReply(transcript) {
   const turnId = String(Date.now()) + "-" + Math.random().toString(36).slice(2, 8);
+  // Read once per turn: changing it mid-reply would let more requests in flight
+  // than the semaphore below has accounted for.
+  const concurrency = t("speech.synth_concurrency");
 
   return new Promise((resolve, reject) => {
     let inFlight = 0;
     const waitingForSlot = [];
     const acquireSlot = () => {
-      if (inFlight < SYNTH_CONCURRENCY) {
+      if (inFlight < concurrency) {
         inFlight++;
         return Promise.resolve();
       }
@@ -317,7 +311,7 @@ function speakStreamingReply(transcript) {
 function endTurn({ keepEvent = false } = {}) {
   resetBuffers();
   confirmedHops = 0;
-  cooldownUntil = Date.now() + COOLDOWN_MS;
+  cooldownUntil = Date.now() + t("mic.cooldown_ms");
   if (!keepEvent) clearEvent();
   phase = "idle";
 }
@@ -396,7 +390,22 @@ async function syncVoiceFromSettings() {
 }
 
 window.addEventListener("DOMContentLoaded", () => {
-  syncVoiceFromSettings();
+  // Awaited before anything else: every threshold in this feature is a setting,
+  // and opening the microphone with them unloaded would throw somewhere deep in
+  // the hop handler instead of here.
+  loadTunables()
+    .then(syncVoiceFromSettings)
+    .catch((err) =>
+      // Deliberately not showVoiceError: that reads a tunable to decide how long
+      // to stay up, and the one thing that can bring us here is tunables being
+      // unreadable. This duration is a local choice for this one message, not a
+      // second copy of that setting's default.
+      showTransientNotice(
+        "state-voice_error",
+        err?.message || "Couldn't read the voice settings.",
+        6000
+      )
+    );
   // Settings lives in its own webview, so flipping the toggle there can't call
   // into this one — the backend re-broadcasts the change and we react to it.
   // Same shape as signals.js: this module has no exports and is loaded purely

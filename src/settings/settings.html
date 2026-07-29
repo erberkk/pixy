@@ -38,6 +38,10 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12h2l2-5 2 10 2-13 2 16 2-13 2 10 2-5h2"/></svg>
           <span>Voice</span>
         </button>
+        <button class="hub-nav-item" data-section="advanced">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg>
+          <span>Advanced</span>
+        </button>
       </nav>
 
       <div class="hub-content">
@@ -328,6 +332,27 @@
             also fires on things that only sound like it. Raise it if it triggers
             by itself; lower it if it keeps missing you.
           </p>
+        </section>
+
+        <section class="hub-section" id="section-advanced">
+          <p class="hint">
+            Values that depend on your machine rather than on the widget &mdash; your
+            room&rsquo;s noise, your speech server&rsquo;s speed, how long you have to be
+            away before the mascot thinks you left. Every one of them has a
+            working default, so nothing here needs touching to get started.
+          </p>
+
+          <!-- Rendered from the schema the backend sends (src-tauri/src/tunables.rs),
+               not written out by hand: a settings form kept in sync manually is a
+               settings form that eventually disagrees with the code reading it. -->
+          <div id="tunableGroups"></div>
+
+          <div class="status" id="advancedStatus"></div>
+
+          <div class="actions">
+            <button class="btn" id="advancedResetBtn">Reset all to defaults</button>
+            <button class="btn primary" id="advancedSaveBtn">Save</button>
+          </div>
         </section>
       </div>
     </div>

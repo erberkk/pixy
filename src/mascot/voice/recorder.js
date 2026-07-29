@@ -11,23 +11,10 @@
 // single known-active speaker, where the only question is "still talking?".
 // Energy answers that, and it costs nothing next to another ONNX model.
 import { SAMPLE_RATE } from "./wakeword.js";
-
-// Speech has to exceed the measured floor by this factor to count as voiced.
-// 2.5x is roughly 8dB — comfortably above the drift of a room's own noise, and
-// below the margin of even quiet speech.
-const SPEECH_OVER_FLOOR = 2.5;
-// A floor is never treated as lower than this, so in a near-silent room the
-// factor above doesn't turn breathing into speech.
-const MIN_FLOOR_RMS = 0.002;
-const SILENCE_TO_END_MS = 900; // pause that ends the utterance
-const MIN_UTTERANCE_MS = 400; // shorter than this is a click or a cough
-const MAX_UTTERANCE_MS = 15000; // hard stop so a stuck-open mic can't record forever
-// Speech is only accepted as *started* once this much voiced audio has arrived;
-// a single loud hop is a door slam, not a sentence.
-const SPEECH_TO_START_MS = 160;
-// If the wake word fired but nobody actually said anything, give up rather than
-// sit in recording state.
-const NO_SPEECH_TIMEOUT_MS = 2500;
+// Every threshold here depends on the room and the microphone, so they are all
+// settings (see src-tauri/src/tunables.rs) rather than constants — a value that
+// works in a quiet office is either deaf or jumpy somewhere else.
+import { t } from "../../shared/tunables.js";
 
 const rms = (hop) => {
   let sum = 0;
@@ -36,20 +23,29 @@ const rms = (hop) => {
 };
 
 // Rolling noise floor, fed continuously by voice.js while it listens for the
-// wake word so a recording always starts with a current estimate.
-let floorRms = MIN_FLOOR_RMS;
+// wake word so a recording always starts with a current estimate. Starts
+// unmeasured rather than at the configured minimum: the first hop then sets it
+// outright, instead of the slow upward alpha below having to climb to the real
+// level from wherever the minimum happens to sit.
+let floorRms = null;
 
 export function observeIdleHop(hop) {
   const level = rms(hop);
+  if (floorRms === null) {
+    floorRms = level;
+    return;
+  }
   // Asymmetric: adapt down quickly (the fan stopped, someone left the room) and
   // up slowly, so a burst of speech doesn't raise the floor to the point that
-  // the rest of the sentence falls below it.
+  // the rest of the sentence falls below it. Not exposed as a setting — unlike
+  // the thresholds, an adaptation rate isn't something a user can reason about
+  // from what they hear.
   const alpha = level < floorRms ? 0.2 : 0.02;
   floorRms = floorRms * (1 - alpha) + level * alpha;
 }
 
 function currentFloor() {
-  return Math.max(floorRms, MIN_FLOOR_RMS);
+  return Math.max(floorRms ?? 0, t("mic.min_floor_rms"));
 }
 
 const msToHops = (ms) => Math.round(ms / ((hopSamples() / SAMPLE_RATE) * 1000));
@@ -68,7 +64,16 @@ function hopSamples() {
  */
 export function startRecording() {
   const hops = [];
-  const threshold = currentFloor() * SPEECH_OVER_FLOOR;
+  const threshold = currentFloor() * t("mic.speech_over_floor");
+  // Read once per recording, not per hop: a settings change mid-sentence would
+  // otherwise move the goalposts while deciding whether that same sentence has
+  // ended. Kept in milliseconds and converted inside push() below, because
+  // msToHops depends on the hop size actually observed from the stream.
+  const minUtteranceMs = t("mic.min_utterance_ms");
+  const speechToStartMs = t("mic.speech_to_start_ms");
+  const silenceToEndMs = t("mic.silence_to_end_ms");
+  const noSpeechTimeoutMs = t("mic.no_speech_timeout_ms");
+  const maxUtteranceMs = t("mic.max_utterance_ms");
 
   let resolveDone;
   const done = new Promise((resolve) => {
@@ -84,7 +89,7 @@ export function startRecording() {
   function finish(accept) {
     if (finished) return;
     finished = true;
-    if (!accept || hops.length * ((hopSamples() / SAMPLE_RATE) * 1000) < MIN_UTTERANCE_MS) {
+    if (!accept || hops.length * ((hopSamples() / SAMPLE_RATE) * 1000) < minUtteranceMs) {
       resolveDone(null);
       return;
     }
@@ -103,19 +108,19 @@ export function startRecording() {
       if (voiced) {
         voicedHops++;
         silentHops = 0;
-        if (voicedHops >= msToHops(SPEECH_TO_START_MS)) started = true;
+        if (voicedHops >= msToHops(speechToStartMs)) started = true;
       } else {
         silentHops++;
       }
 
-      if (started && silentHops >= msToHops(SILENCE_TO_END_MS)) {
+      if (started && silentHops >= msToHops(silenceToEndMs)) {
         // Trailing silence is trimmed: it is dead weight in the upload and,
         // for whisper, an invitation to hallucinate filler into the gap.
         hops.length = Math.max(0, hops.length - silentHops);
         finish(true);
-      } else if (!started && totalHops >= msToHops(NO_SPEECH_TIMEOUT_MS)) {
+      } else if (!started && totalHops >= msToHops(noSpeechTimeoutMs)) {
         finish(false);
-      } else if (totalHops >= msToHops(MAX_UTTERANCE_MS)) {
+      } else if (totalHops >= msToHops(maxUtteranceMs)) {
         finish(started);
       }
     },

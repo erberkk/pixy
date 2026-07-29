@@ -5,23 +5,7 @@
   "windows": [
     "mascot",
     "workspace",
-    "settings",
-    "terminal",
-    "terminal2",
-    "terminal3",
-    "terminal4",
-    "terminal5",
-    "terminal6",
-    "terminal7",
-    "terminal8",
-    "terminal9",
-    "terminal10",
-    "terminal11",
-    "terminal12",
-    "terminal13",
-    "terminal14",
-    "terminal15",
-    "terminal16"
+    "settings"
   ],
   "permissions": [
     "core:default",

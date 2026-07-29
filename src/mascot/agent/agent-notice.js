@@ -1,42 +1,26 @@
 // The agent permission card: renders a Claude Code PreToolUse/AskUserQuestion
 // hook payload (see agent/server.rs) into an approve/deny — or multiple-choice —
-// prompt, one card per pooled terminal session. Pinned open via the notice lock
-// until every pending request is resolved.
+// prompt, one card per waiting request. Pinned open via the notice lock until
+// every pending request is resolved.
 import { invoke } from "../../shared/tauri.js";
 import { beep } from "../lib/sound.js";
 import { reportHotRectSoon } from "../lib/hotrect.js";
 import { clearRevertTimer, lockNotice, unlockNotice } from "../notice/notice.js";
-import { computeAmbient } from "../pip/signals.js";
+import { refreshAmbient } from "../pip/signals.js";
 
-// buildAgentSessionsList indexes it by whatever's in SessionSummary.agent.
-const AGENT_LABELS = {
-  claude: "Claude",
-};
-
-// terminalN -> "Terminal N" (plain "terminal" is slot 1) — used by both the
-// permission card header (implicitly, via session_id) and the "show all
-// agents" list rows. A null session_id means the hook fired with no
-// resolvable WIDGET_TERMINAL_LABEL (Claude running outside this app's pooled
-// terminals) — there's no window to name or focus, so say so instead of
-// guessing "Terminal 1".
-function terminalDisplayName(sessionId) {
-  if (!sessionId) return "External session";
-  const match = /(\d+)$/.exec(sessionId);
-  return match ? `Terminal ${match[1]}` : "Terminal 1";
+// Whatever the hook chose to call itself, for the card header. `?label=` in the
+// hook URL is optional and free-form: it used to name one of this app's own
+// terminal windows, and those are gone, so most requests now arrive without one.
+function sourceDisplayName(sessionId) {
+  return sessionId || "Claude Code";
 }
 
-// Pinned open like the digest card (see noticeLocked) — each pooled terminal
-// (agent/terminal.rs) can have its own Claude Code session independently blocked on
-// a decision, so this is a LIST of pending requests, one .permission-card per
-// entry, stacked vertically instead of shown one-at-a-time. Keyed by
-// request_id (not session_id — a request with no resolvable terminal label
-// has session_id: null, and two such requests must still be told apart).
+// Pinned open like the digest card (see noticeLocked) — several Claude Code
+// sessions can be blocked on a decision at once, so this is a LIST of pending
+// requests, one .permission-card per entry, stacked vertically instead of shown
+// one-at-a-time. Keyed by request_id, not session_id: most requests carry no
+// label at all, and two unlabeled ones must still be told apart.
 let pendingPermissions = [];
-
-// Toggled by the "Show all agents" button — independent of pendingPermissions
-// so the expanded list survives across re-renders (e.g. a new prompt arriving
-// from another terminal) until the user explicitly collapses it again.
-let allSessionsVisible = false;
 
 // tool_name/tool_input come straight from Claude Code's own PermissionRequest
 // hook payload (see agent/terminal.rs's record_permission_request) — real
@@ -237,7 +221,7 @@ function renderPermissionList() {
 
     const source = document.createElement("span");
     source.className = "permission-header-source";
-    source.textContent = terminalDisplayName(req.session_id);
+    source.textContent = sourceDisplayName(req.session_id);
     header.appendChild(source);
 
     const text = document.createElement("span");
@@ -245,9 +229,7 @@ function renderPermissionList() {
     text.textContent = req.questions ? "asked" : "needs approval";
     header.appendChild(text);
 
-    // For requests with no resolvable terminal (session_id null — Claude
-    // running outside this app's pooled terminals, see terminalDisplayName),
-    // there's no automatic way to tell "still genuinely pending" apart from
+    // There's no automatic way to tell "still genuinely pending" apart from
     // "the hook that asked already gave up client-side and nobody will ever
     // answer this" (AgentGlance solves the equivalent case by auto-flushing
     // on the session's next forward-progress hook; this app doesn't track
@@ -295,96 +277,15 @@ function renderPermissionList() {
 
     notice.appendChild(card);
   }
-
-  appendAgentSessionsSection(notice);
 }
 
-// "Show all agents" — expands into a list of EVERY pooled terminal that's
-// been opened this run (not just ones with a pending decision), each row
-// showing its detected agent CLI + last visible activity line, click to
-// focus that terminal window. Fetched fresh from the backend each time it's
-// expanded rather than kept in sync live — this is a glanceable summary, not
-// a real-time dashboard.
-function appendAgentSessionsSection(notice) {
-  const toggleBtn = document.createElement("button");
-  toggleBtn.className = "show-all-agents-btn";
-  toggleBtn.textContent = allSessionsVisible ? "Hide all agents" : "Show all agents";
-  toggleBtn.addEventListener("click", () => {
-    allSessionsVisible = !allSessionsVisible;
-    renderPermissionList();
-    reportHotRectSoon();
-  });
-  notice.appendChild(toggleBtn);
-
-  if (!allSessionsVisible) return;
-
-  const placeholder = document.createElement("div");
-  placeholder.className = "agent-sessions-list";
-  const loading = document.createElement("div");
-  loading.className = "agent-session-empty";
-  loading.textContent = "Loading…";
-  placeholder.appendChild(loading);
-  notice.appendChild(placeholder);
-
-  invoke("list_agent_sessions")
-    .then((sessions) => {
-      if (!allSessionsVisible || !placeholder.isConnected) return; // collapsed/re-rendered before this resolved
-      placeholder.replaceWith(buildAgentSessionsList(sessions));
-      reportHotRectSoon();
-    })
-    .catch(() => {
-      if (!allSessionsVisible || !placeholder.isConnected) return;
-      loading.textContent = "Couldn't load agent sessions";
-    });
-}
-
-function buildAgentSessionsList(sessions) {
-  const list = document.createElement("div");
-  list.className = "agent-sessions-list";
-
-  if (sessions.length === 0) {
-    const empty = document.createElement("div");
-    empty.className = "agent-session-empty";
-    empty.textContent = "No agent terminals opened yet";
-    list.appendChild(empty);
-    return list;
-  }
-
-  for (const s of sessions) {
-    const row = document.createElement("div");
-    row.className = "agent-session-row";
-    row.addEventListener("click", () => {
-      invoke("focus_terminal_session", { label: s.session_id });
-    });
-
-    const badge = document.createElement("span");
-    badge.className = `agent-badge agent-badge--${s.agent || "idle"}`;
-    badge.textContent = s.agent ? AGENT_LABELS[s.agent] || s.agent : "Idle";
-    row.appendChild(badge);
-
-    const info = document.createElement("div");
-    info.className = "agent-session-info";
-    const label = document.createElement("span");
-    label.className = "agent-session-label";
-    label.textContent = terminalDisplayName(s.session_id);
-    info.appendChild(label);
-    const activity = document.createElement("span");
-    activity.className = "agent-session-activity";
-    activity.textContent = s.activity || "No activity yet";
-    info.appendChild(activity);
-    row.appendChild(info);
-
-    if (s.has_pending) {
-      const dot = document.createElement("span");
-      dot.className = "agent-session-pending-dot";
-      dot.title = "Waiting for your approval";
-      row.appendChild(dot);
-    }
-
-    list.appendChild(row);
-  }
-  return list;
-}
+// There used to be a "Show all agents" section here, listing every terminal this
+// app had opened with its detected CLI and last visible activity line, click to
+// focus that window. It was only ever able to show sessions running inside the
+// app's own terminal pool — which no longer exists, because the hooks report
+// from wherever Claude actually runs. Nothing replaced it: the useful half (a
+// request is waiting) is the card itself, and "which window is it in" is not
+// something we can answer for a terminal we didn't launch.
 
 export function showAgentPermissionNotice({ session_id, request_id, tool_name, tool_input, questions }) {
   clearRevertTimer();
@@ -412,13 +313,12 @@ function finishResolvedPermission(requestId) {
   pendingPermissions = pendingPermissions.filter((p) => p.request_id !== requestId);
   if (pendingPermissions.length === 0) {
     unlockNotice();
-    allSessionsVisible = false;
     document.body.className = "state-idle";
   } else {
     renderPermissionList();
   }
   reportHotRectSoon();
-  computeAmbient(); // don't wait up to 5s for "waiting" to clear once this resolves
+  refreshAmbient(); // don't wait a whole poll interval for "waiting" to clear once this resolves
 }
 
 function resolveAgentPermission(requestId, approve) {

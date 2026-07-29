@@ -11,12 +11,14 @@ export function openSettings() {
   invoke("open_settings");
 }
 
+// Your normal terminal, not one of ours — the app used to run Claude inside its
+// own PTY windows so it could watch the screen, and the hooks replaced that.
 export function openTerminal() {
-  invoke("open_terminal");
+  invoke("open_system_terminal");
 }
 
 // System-tray-style minimize, not app.exit() — background watchers (GitHub
-// polling, terminal sessions) keep running; bring it back via the tray icon.
+// polling, the hook event server) keep running; bring it back via the tray icon.
 export function hideMascot() {
   invoke("hide_mascot");
 }

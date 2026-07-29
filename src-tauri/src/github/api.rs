@@ -215,6 +215,11 @@ fn write_pr_cache(app: &tauri::AppHandle, cache: &HashMap<String, String>) {
     }
 }
 
+pub(crate) fn minutes_since(updated_at: &str) -> Option<i64> {
+    let then = chrono::DateTime::parse_from_rfc3339(updated_at).ok()?;
+    Some((chrono::Utc::now() - then.with_timezone(&chrono::Utc)).num_minutes())
+}
+
 // Polls the user's PRs (every state, not just open) and notifies the mascot
 // the moment one flips from open to merged. The cache starts empty on first
 // run, so nothing that was ALREADY merged before the widget noticed it gets
@@ -223,19 +228,14 @@ fn write_pr_cache(app: &tauri::AppHandle, cache: &HashMap<String, String>) {
 // can only mean it went open->merged fast enough that we never observed the
 // "open" snapshot in between (created and merged inside one 5-minute
 // window). Without this, a PR merged that quickly would silently never
-// notify, since there's no prior "open" entry to compare against.
-const MERGE_FRESHNESS_MINUTES: i64 = 10;
-
-pub(crate) fn minutes_since(updated_at: &str) -> Option<i64> {
-    let then = chrono::DateTime::parse_from_rfc3339(updated_at).ok()?;
-    Some((chrono::Utc::now() - then.with_timezone(&chrono::Utc)).num_minutes())
-}
-
+// notify, since there's no prior "open" entry to compare against. How wide
+// that window is is the merge-freshness setting (tunables.rs).
 fn poll_for_merges(app: &tauri::AppHandle) {
     let cfg = read_config(app);
     let Some(token) = cfg.github_token.filter(|t| !t.trim().is_empty()) else {
         return;
     };
+    let freshness_minutes = crate::tunables::int(app, crate::tunables::GITHUB_MERGE_FRESHNESS);
     let prs = match search_issues(&token, "is:pr author:@me") {
         Ok(p) => p,
         Err(e) => {
@@ -251,7 +251,7 @@ fn poll_for_merges(app: &tauri::AppHandle) {
         let was_open = prior.as_deref() == Some("open");
         let is_fresh_unseen_merge = prior.is_none()
             && pr.state == "merged"
-            && minutes_since(&pr.updated_at).map(|m| m <= MERGE_FRESHNESS_MINUTES).unwrap_or(false);
+            && minutes_since(&pr.updated_at).map(|m| m <= freshness_minutes).unwrap_or(false);
 
         if (was_open || is_fresh_unseen_merge) && pr.state == "merged" {
             append_debug_log(
@@ -333,8 +333,6 @@ pub fn start_merge_watcher(app: tauri::AppHandle) {
         std::thread::sleep(Duration::from_secs(300));
     });
 }
-
-const DIGEST_HOUR: u32 = 9; // run at/after 9am local time
 
 fn truncate_str(text: &str, max_len: usize) -> String {
     if text.chars().count() > max_len {
@@ -523,11 +521,10 @@ fn enrich_with_reviews(token: &str, pull_requests: &mut [GithubItem]) {
     }
 }
 
-// Computed here rather than left for the model to infer from list position —
-// asking it to judge "staleness" from ordering alone (no real dates) reliably
-// produced "nothing is urgent" even when items hadn't moved in months.
-const STALE_DAYS: i64 = 30;
-
+// Staleness is computed here rather than left for the model to infer from list
+// position — asking it to judge that from ordering alone (no real dates)
+// reliably produced "nothing is urgent" even when items hadn't moved in months.
+// The cutoff itself is a setting (tunables.rs).
 fn days_since(updated_at: &str) -> Option<i64> {
     let then = chrono::DateTime::parse_from_rfc3339(updated_at).ok()?;
     Some((chrono::Utc::now() - then.with_timezone(&chrono::Utc)).num_days())
@@ -541,7 +538,7 @@ fn days_since(updated_at: &str) -> Option<i64> {
 // approved, who's stale) precisely, there's nothing left for a model to
 // usefully judge here — assembling it ourselves guarantees nothing is
 // missing, issues come before PRs, and stale items collapse into one line.
-fn build_final_digest(report: &GithubReport) -> String {
+fn build_final_digest(report: &GithubReport, stale_days: i64) -> String {
     let mut out = vec![format!(
         "- Workload: {} issues, {} pull requests open.",
         report.issues.len(),
@@ -577,12 +574,12 @@ fn build_final_digest(report: &GithubReport) -> String {
         .issues
         .iter()
         .chain(report.pull_requests.iter())
-        .filter(|i| days_since(&i.updated_at).map(|d| d >= STALE_DAYS).unwrap_or(false))
+        .filter(|i| days_since(&i.updated_at).map(|d| d >= stale_days).unwrap_or(false))
         .map(|i| format!("{} #{}", i.repo, i.number))
         .collect();
     if !stale.is_empty() {
         attention.push(format!(
-            "{} item(s) stale (30+ days, no update): {}",
+            "{} item(s) stale ({stale_days}+ days, no update): {}",
             stale.len(),
             stale.join(", ")
         ));
@@ -680,17 +677,20 @@ pub fn run_daily_digest(app: &tauri::AppHandle) {
     }
 
     let report = GithubReport { issues, pull_requests };
-    let summary = build_final_digest(&report);
+    let summary = build_final_digest(
+        &report,
+        crate::tunables::int(app, crate::tunables::GITHUB_STALE_DAYS),
+    );
     append_debug_log(app, &format!("===== {ts} =====\n--- final digest ---\n{summary}"));
     let _ = app.emit("github-digest", json!({ "summary": summary }));
 }
 
-// Checks every 10 minutes; fires once per calendar day, only at/after
-// DIGEST_HOUR local time (so it lands "in the morning", not the instant
-// midnight ticks over). If the PC was off/asleep at DIGEST_HOUR, this still
-// catches up the first time it checks afterward that day (whatever time
+// Checks every 10 minutes; fires once per calendar day, only at/after the
+// configured digest hour in local time (so it lands "in the morning", not the
+// instant midnight ticks over). If the PC was off/asleep at that hour, this
+// still catches up the first time it checks afterward that day (whatever time
 // that ends up being) — it only cares "did today already run", not "is it
-// exactly DIGEST_HOUR right now". Every check (run or skipped) gets a log
+// exactly that hour right now". Every check (run or skipped) gets a log
 // line so it's visible this is actually alive, not just running silently.
 pub fn start_daily_digest_watcher(app: tauri::AppHandle) {
     std::thread::spawn(move || loop {
@@ -698,18 +698,21 @@ pub fn start_daily_digest_watcher(app: tauri::AppHandle) {
         let stamp = now.format("%Y-%m-%d %H:%M:%S");
         let today = now.date_naive().to_string();
         let already_ran_today = read_config(&app).last_digest_date.as_deref() == Some(today.as_str());
+        // Re-read per check rather than once outside the loop, so moving the
+        // hour earlier in Settings can still fire the digest today.
+        let digest_hour = crate::tunables::int(&app, crate::tunables::GITHUB_DIGEST_HOUR) as u32;
 
         if already_ran_today {
             append_debug_log(&app, &format!("[{stamp}] watcher check: already ran today, skipping"));
-        } else if now.hour() < DIGEST_HOUR {
+        } else if now.hour() < digest_hour {
             append_debug_log(
                 &app,
-                &format!("[{stamp}] watcher check: not yet {DIGEST_HOUR}:00 local time, skipping for now"),
+                &format!("[{stamp}] watcher check: not yet {digest_hour}:00 local time, skipping for now"),
             );
         } else {
             append_debug_log(
                 &app,
-                &format!("[{stamp}] watcher check: not run today yet and past {DIGEST_HOUR}:00 — running now"),
+                &format!("[{stamp}] watcher check: not run today yet and past {digest_hour}:00 — running now"),
             );
             run_daily_digest(&app);
         }

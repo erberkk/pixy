@@ -67,9 +67,9 @@ const melInput = new Float32Array(MEL_WINDOW_SAMPLES);
 function loadOrtRuntime() {
   if (window.ort) return Promise.resolve(window.ort);
   // onnxruntime-web ships as a classic script that assigns window.ort, so it is
-  // injected rather than imported — the same reason vendor/xterm is a <script>
-  // tag in the HTML. It is loaded here instead of in index.html so a user who
-  // never turns the voice assistant on never pays the 11MB wasm download.
+  // injected rather than imported. It is loaded here instead of in index.html so
+  // a user who never turns the voice assistant on never pays the 11MB wasm
+  // download.
   return new Promise((resolve, reject) => {
     const script = document.createElement("script");
     script.src = new URL("ort.wasm.min.js", ORT_DIR).href;

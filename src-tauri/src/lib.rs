@@ -1,20 +1,22 @@
 // Feature-grouped modules — see each group's mod.rs for what it covers.
-// `config` stays at the root because every group reads and writes the single
-// shared AppConfig file.
+// `config` and `tunables` stay at the root because every group reads them:
+// config is the single shared AppConfig file, and tunables is the registry of
+// per-machine values that groups read instead of hardcoding.
 mod agent;
 mod ai;
 mod config;
 mod content;
 mod github;
 mod system;
+mod tunables;
 mod ui;
 
 use tauri::utils::config::Color;
 use tauri::Manager;
 
-use agent::server::{dismiss_permission, respond_permission, start_event_server};
-use agent::terminal::{
-    list_agent_sessions, report_terminal_text, resize_pty, start_terminal_session, write_to_pty,
+use agent::server::{
+    dismiss_permission, get_event_server_status, pending_permissions, respond_permission,
+    start_event_server,
 };
 use ai::chat::{
     delete_chat, get_chat_instructions, list_chats, load_chat, pick_chat_attachment, record_voice_turn, save_chat,
@@ -41,10 +43,11 @@ use system::media::{
     system_speaker_set_volume,
 };
 use system::power::{get_idle_seconds, get_power_status};
+use tunables::{get_tunables, save_tunables};
 use ui::clickthrough::{set_click_through_paused, set_hot_rect};
 use ui::windows::{
-    focus_terminal_session, hide_mascot, hide_workspace, hide_settings, hide_terminal, open_workspace,
-    open_settings, open_terminal, position_top_center,
+    hide_mascot, hide_settings, hide_workspace, open_settings, open_system_terminal, open_workspace,
+    position_top_center,
 };
 
 // Hides (not destroys) a window on close — destroying it would require
@@ -108,17 +111,11 @@ pub fn run() {
             open_in_browser,
             set_hot_rect,
             set_click_through_paused,
-            open_terminal,
-            hide_terminal,
+            open_system_terminal,
             hide_mascot,
-            start_terminal_session,
-            write_to_pty,
-            report_terminal_text,
-            resize_pty,
             respond_permission,
             dismiss_permission,
-            list_agent_sessions,
-            focus_terminal_session,
+            pending_permissions,
             spotify_get_state,
             spotify_play_pause,
             spotify_next,
@@ -138,7 +135,10 @@ pub fn run() {
             list_memories,
             get_memory_roots,
             add_memory_root,
-            remove_memory_root
+            remove_memory_root,
+            get_tunables,
+            save_tunables,
+            get_event_server_status
         ])
         .setup(|app| {
             let window = app
@@ -162,9 +162,6 @@ pub fn run() {
             if let Some(settings_window) = app.get_webview_window("settings") {
                 hide_on_close(&settings_window);
                 let _ = settings_window.set_background_color(Some(Color(0, 0, 0, 0)));
-            }
-            if let Some(terminal_window) = app.get_webview_window("terminal") {
-                hide_on_close(&terminal_window);
             }
 
             ui::tray::setup_tray(app)?;

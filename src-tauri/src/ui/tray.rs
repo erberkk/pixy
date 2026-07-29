@@ -5,14 +5,13 @@ use tauri::Manager;
 use crate::github;
 use crate::ai::llm;
 use crate::system::media;
-use crate::agent::terminal;
-use crate::ui::windows::{open_workspace, open_terminal};
+use crate::ui::windows::{open_system_terminal, open_workspace};
 
 pub fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
     let show_item = MenuItemBuilder::with_id("show", "Show mascot").build(app)?;
     let hide_item = MenuItemBuilder::with_id("hide", "Hide mascot").build(app)?;
     let workspace_item = MenuItemBuilder::with_id("workspace", "Open Workspace").build(app)?;
-    let terminal_item = MenuItemBuilder::with_id("terminal", "Open Agent Terminal").build(app)?;
+    let terminal_item = MenuItemBuilder::with_id("terminal", "Open Terminal").build(app)?;
     let github_digest_item =
         MenuItemBuilder::with_id("github_digest_now", "Run GitHub Digest Now").build(app)?;
     // Temporary — risk-spike probe for the GSMTC Spotify integration (see
@@ -50,15 +49,11 @@ pub fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
                 }
             }
             "workspace" => open_workspace(app.clone()),
-            "terminal" => open_terminal(app.clone()),
+            "terminal" => open_system_terminal(),
             "github_digest_now" => github::run_github_digest_now(app.clone()),
             "spotify_probe" => media::probe_spotify(app.clone()),
-            "quit" => {
-                terminal::stop_terminal_session();
-                app.exit(0);
-            }
+            "quit" => app.exit(0),
             "quit_stop_llm" => {
-                terminal::stop_terminal_session();
                 llm::stop_autostarted();
                 crate::ai::speech::stop_autostarted();
                 app.exit(0);

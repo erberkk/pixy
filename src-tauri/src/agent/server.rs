@@ -7,8 +7,6 @@ use serde::Deserialize;
 use serde_json::{json, Value as JsonValue};
 use tauri::Emitter;
 
-const EVENT_PORT: u16 = 47623;
-
 #[derive(Deserialize)]
 struct MascotEvent {
     state: String,
@@ -80,10 +78,9 @@ struct DecidePayload {
 // now travels back as this HTTP response's body — no PTY keystrokes at all.
 struct PendingDecision {
     request: tiny_http::Request,
-    // Which pooled terminal (WIDGET_TERMINAL_LABEL) this came from, if
-    // resolvable — lets resolve_decision clear that terminal's display flag
-    // (agent/terminal.rs's clear_pending) once answered.
-    label: Option<String>,
+    // When the hook arrived. This registry is now the only source of "somebody
+    // is waiting on you" — see pending_permissions below.
+    since: std::time::Instant,
 }
 
 static PENDING: OnceLock<Mutex<HashMap<String, PendingDecision>>> = OnceLock::new();
@@ -118,11 +115,13 @@ fn extract_questions(tool_name: &str, tool_input: &JsonValue) -> Option<JsonValu
 // responded to here — until the mascot's Approve/Deny (or, for
 // AskUserQuestion, its option-chip Submit) calls resolve_decision. Claude
 // Code itself blocks the tool call on this HTTP response, so the human can
-// answer from the widget with no PTY keystroke involved at all; `label`
-// (WIDGET_TERMINAL_LABEL, set per pooled terminal in agent/terminal.rs, inherited
-// down the process tree) is used only to flag that terminal's display state
-// (agent/terminal.rs's mark_pending) and to focus/attribute the card to the right
-// window — the decision itself doesn't need it.
+// answer from the widget with no PTY keystroke involved at all.
+//
+// `?label=` is still read, but only to caption the card: it used to name one of
+// this app's own pooled terminals, and back when it did, it was also what marked
+// that terminal as waiting. Those terminals are gone — Claude Code runs wherever
+// the user runs it — so the label is now just a string the hook may or may not
+// provide, and nothing depends on it.
 fn handle_decide_request(mut request: tiny_http::Request, app_handle: &tauri::AppHandle) {
     let label = query_param(request.url(), "label").filter(|l| !l.is_empty());
 
@@ -139,15 +138,11 @@ fn handle_decide_request(mut request: tiny_http::Request, app_handle: &tauri::Ap
 
     let request_id = next_request_id();
 
-    if let Some(label) = &label {
-        crate::agent::terminal::mark_pending(app_handle, label, &tool_name);
-    }
-
     pending().lock().unwrap().insert(
         request_id.clone(),
         PendingDecision {
             request,
-            label: label.clone(),
+            since: std::time::Instant::now(),
         },
     );
 
@@ -190,11 +185,33 @@ pub fn resolve_decision(request_id: &str, behavior: &str, updated_input: Option<
         .expect("valid header");
     let response = tiny_http::Response::from_string(body).with_header(header);
     let _ = entry.request.respond(response);
-
-    if let Some(label) = &entry.label {
-        crate::agent::terminal::clear_pending(label);
-    }
     Ok(())
+}
+
+/// How many permission requests are waiting, and how long the oldest has been.
+///
+/// This is what drives the mascot's "waiting"/"forgotten" poses (pip/signals.js).
+/// It used to be derived from a flag on one of this app's own pooled terminal
+/// sessions, keyed by WIDGET_TERMINAL_LABEL — which meant it only ever fired for
+/// Claude running *inside* the widget. Reading the registry instead makes it work
+/// for any terminal, which is the whole point of the hooks being the integration.
+#[derive(serde::Serialize)]
+pub struct PendingPermissions {
+    count: usize,
+    oldest_secs: u64,
+}
+
+#[tauri::command]
+pub fn pending_permissions() -> PendingPermissions {
+    let guard = pending().lock().unwrap();
+    PendingPermissions {
+        count: guard.len(),
+        oldest_secs: guard
+            .values()
+            .map(|entry| entry.since.elapsed().as_secs())
+            .max()
+            .unwrap_or(0),
+    }
 }
 
 // Single entry point for every way the mascot can answer a pending
@@ -213,9 +230,7 @@ pub fn respond_permission(request_id: String, approve: bool, updated_input: Opti
 // this by auto-flushing a session's queued decisions the moment a
 // forward-progress hook (PostToolUse/Stop/UserPromptSubmit/SessionEnd)
 // arrives for it; this app doesn't track those extra hook events or attempt
-// session correlation for requests with no resolvable terminal label (e.g.
-// "External session" — Claude running outside this app's pooled terminals),
-// so there's no reliable automatic signal to flush on. This command is the
+// session correlation, so there's no reliable automatic signal to flush on. This command is the
 // manual equivalent: a "Dismiss" affordance that discards the card and
 // answers "deny" (a safe default — never silently allow something nobody
 // actually reviewed) so the underlying connection is freed either way.
@@ -224,16 +239,64 @@ pub fn dismiss_permission(request_id: String) -> Result<(), String> {
     resolve_decision(&request_id, "deny", None)
 }
 
+// Whether the event server actually got its port, kept so the settings window
+// can say so. Surfaced in the UI rather than only on stderr because a release
+// build is a GUI-subsystem binary with no console attached: a failed bind there
+// would be completely invisible, and the symptom — Claude Code hooks silently
+// doing nothing — gives no hint of where to look. The likeliest cause is also
+// the user having just changed the port, so the place they need to be told is
+// the field they changed.
+static BIND_STATUS: Mutex<Option<(u16, Option<String>)>> = Mutex::new(None);
+
+#[derive(serde::Serialize)]
+pub struct EventServerStatus {
+    port: u16,
+    listening: bool,
+    error: Option<String>,
+    /// False until the server thread has had its turn — the settings window can
+    /// open before then, and "not listening" would be a lie in that instant.
+    known: bool,
+}
+
+#[tauri::command]
+pub fn get_event_server_status() -> EventServerStatus {
+    match BIND_STATUS.lock().ok().and_then(|guard| guard.clone()) {
+        Some((port, error)) => EventServerStatus {
+            port,
+            listening: error.is_none(),
+            error,
+            known: true,
+        },
+        None => EventServerStatus {
+            port: 0,
+            listening: false,
+            error: None,
+            known: false,
+        },
+    }
+}
+
 pub fn start_event_server(app_handle: tauri::AppHandle) {
+    // Read once, here: the port is what the socket is bound to, so a change only
+    // takes effect on the next launch — which is why its schema entry is marked
+    // as needing a restart.
+    let port = crate::tunables::int(&app_handle, crate::tunables::EVENT_PORT) as u16;
     thread::spawn(move || {
-        let addr = format!("127.0.0.1:{EVENT_PORT}");
+        let addr = format!("127.0.0.1:{port}");
         let server = match tiny_http::Server::http(&addr) {
             Ok(server) => server,
             Err(err) => {
-                eprintln!("failed to bind mascot event server on {addr}: {err}");
+                let message = err.to_string();
+                eprintln!("failed to bind mascot event server on {addr}: {message}");
+                if let Ok(mut guard) = BIND_STATUS.lock() {
+                    *guard = Some((port, Some(message)));
+                }
                 return;
             }
         };
+        if let Ok(mut guard) = BIND_STATUS.lock() {
+            *guard = Some((port, None));
+        }
 
         for request in server.incoming_requests() {
             let app_handle = app_handle.clone();

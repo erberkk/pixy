@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
@@ -161,6 +162,15 @@ pub struct AppConfig {
     // user's mic and room more than on the model.
     #[serde(default)]
     pub voice_threshold: Option<f32>,
+
+    // User overrides for the values described in tunables.rs, keyed by the ids
+    // declared there. Only the ones actually changed are stored — an absent key
+    // means "use the compiled default", so resetting a setting leaves nothing
+    // behind rather than writing the default out as if it had been chosen, and
+    // changing a default in a future version reaches everyone who never touched
+    // it.
+    #[serde(default)]
+    pub tunables: HashMap<String, serde_json::Value>,
 }
 
 pub fn config_path(app: &tauri::AppHandle) -> PathBuf {

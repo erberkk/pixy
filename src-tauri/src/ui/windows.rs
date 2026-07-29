@@ -53,59 +53,36 @@ pub fn hide_settings(app: tauri::AppHandle) {
     hide_window(&app, "settings");
 }
 
-// Fixed pool of pre-declared terminal windows (see tauri.conf.json) — one
-// per concurrently-running Claude Code session the user wants open at once.
-// Dynamic window creation hangs in this environment (see module comment
-// above), so "open another terminal" means "reveal the next not-yet-visible
-// slot in this pool" rather than actually creating a new window. 16 is not
-// a "real" limit meant to constrain usage — nobody realistically runs that
-// many sessions at once — it's just how many hidden WebView2 instances get
-// spawned at app startup (each has a real memory/CPU cost even while hidden), so
-// the number is generous rather than unbounded. Bump this (and mirror the
-// new labels into tauri.conf.json + capabilities/default.json) if it's
-// ever actually hit.
-const TERMINAL_POOL: &[&str] = &[
-    "terminal", "terminal2", "terminal3", "terminal4", "terminal5", "terminal6", "terminal7",
-    "terminal8", "terminal9", "terminal10", "terminal11", "terminal12", "terminal13", "terminal14",
-    "terminal15", "terminal16",
-];
-
+// The one "open" here that isn't one of our own windows: the user's normal
+// terminal.
+//
+// This replaces a pool of sixteen PTY-backed terminal windows the app used to
+// own. Those existed so it could watch Claude Code by reading its rendered
+// screen; the hooks made that unnecessary, and they fire from any terminal —
+// so all the pool did was spawn sixteen cmd.exe and sixteen conhost.exe at
+// every launch whether or not one was ever opened.
+//
+// Windows Terminal first because it is what a Windows 11 user almost certainly
+// means by "terminal", with plain cmd as the fallback for a machine that
+// doesn't have it. Started detached, so closing it has nothing to do with us —
+// which was the other half of the old design's problem.
 #[tauri::command]
-pub fn open_terminal(app: tauri::AppHandle) {
-    for label in TERMINAL_POOL {
-        if let Some(window) = app.get_webview_window(label) {
-            if !window.is_visible().unwrap_or(false) {
-                let _ = window.show();
-                let _ = window.unminimize();
-                let _ = window.set_focus();
-                return;
-            }
-        }
+pub fn open_system_terminal() {
+    let home = std::env::var("USERPROFILE").unwrap_or_else(|_| ".".to_string());
+    if std::process::Command::new("wt.exe")
+        .current_dir(&home)
+        .spawn()
+        .is_ok()
+    {
+        return;
     }
-    // All pool slots are already open — just bring the last one to the
-    // front rather than silently doing nothing.
-    if let Some(window) = app.get_webview_window(TERMINAL_POOL[TERMINAL_POOL.len() - 1]) {
-        let _ = window.set_focus();
-    }
-}
-
-// Invoked from the mascot's "show all agents" list — brings a specific
-// pooled terminal window (by label) to the front, e.g. clicking a row for a
-// session that isn't currently blocked on a permission decision.
-#[tauri::command]
-pub fn focus_terminal_session(app: tauri::AppHandle, label: String) {
-    show_window(&app, &label);
-    if let Some(window) = app.get_webview_window(&label) {
-        let _ = window.unminimize();
-    }
-}
-
-// Invoked from inside a terminal window itself (its own close button), so
-// the calling window IS the one to hide — no need to look it up by a fixed
-// label like the other hide_* commands, since there are several now.
-#[tauri::command]
-pub fn hide_terminal(window: tauri::WebviewWindow) {
-    let _ = window.hide();
+    // `start` is a cmd builtin, not an executable, hence going through cmd /c.
+    // The empty "" is start's title argument — without it, start treats the
+    // next quoted token as the title and opens nothing.
+    let _ = std::process::Command::new("cmd")
+        .args(["/c", "start", "", "cmd"])
+        .current_dir(&home)
+        .spawn();
 }
 
 // The OS window is created at a fixed size (see tauri.conf.json) big enough

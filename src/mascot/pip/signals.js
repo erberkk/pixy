@@ -8,8 +8,11 @@
 //   2. Passive listeners on events the backend already emits (merge, CI,
 //      review-requested, issue updates, digest ready) -> pushEvent(name).
 //
-// `gaming` is intentionally not wired here (no reliable signal yet — see the
-// plan discussion); it still exists in pip.js/pip.css for manual use.
+// `gaming` and `juggling` are intentionally not wired here; both still exist in
+// pip.js/pip.css for manual use. `gaming` has no reliable signal. `juggling`
+// (two or more Claude sessions at once) used to be counted from this app's own
+// pooled terminals, which are gone — the hooks carry a session_id that could
+// bring it back for real terminals, but that isn't wired yet.
 // `working`/`reviewing`/`writing` (splitting "coding" by the active tool's
 // name) were considered and rejected too: tool_name changes multiple times
 // per turn, so this would flicker between moods every tool call instead of
@@ -18,24 +21,21 @@
 import { setAmbient, pushEvent } from "./pipstate.js";
 
 import { invoke, listen } from "../../shared/tauri.js";
+// Every threshold below is a setting rather than a constant — how long "away
+// from the keyboard" means, which apps count as a call, when a battery is low:
+// none of that is the same for two people. See src-tauri/src/tunables.rs.
+import { loadTunables, t, tNames } from "../../shared/tunables.js";
 // The voice assistant holds the microphone open the whole time it is listening
 // for the wake word, which trips the same is_mic_capture_active signal a call
 // does — see the onCall calculation below.
 import { isOpen as voiceHoldsMic } from "../voice/mic.js";
 
-const CALL_APP_RE = /teams|zoom|discord|slack/i;
-const STREAM_APP_RE = /obs/i;
-const FORGOTTEN_THRESHOLD_SECS = 300; // 5 minutes unanswered
-const BREAK_THRESHOLD_SECS = 240; // 4 minutes idle — a short "stepped away" pause, distinct from full sleep
-const SLEEP_THRESHOLD_SECS = 900; // 15 minutes with no keyboard/mouse input
-const LOW_BATTERY_PERCENT = 20;
-const ACTIVE_STALE_SECS = 60; // last_activity older than this no longer counts as "coding"
-
 let spotifyPlaying = false;
 // Timestamp of the last Claude Code hook event of ANY kind (see agent/server.rs's
-// claude-hook-activity emit) — list_agent_sessions only sees activity in
-// this app's OWN pooled terminals, so a `claude` session running in some
-// other window would never otherwise register as "coding".
+// claude-hook-activity emit). This is now the ONLY source of "coding": the app
+// used to also infer it from its own pooled terminals by reading their rendered
+// screens, but those are gone, and the hooks fire from whichever terminal the
+// user actually runs Claude in — which is the case that matters.
 let lastHookActivitySince = null;
 const HOOK_ACTIVITY_CODING_WINDOW_MS = 30000;
 // Timestamp of the last UserPromptSubmit hook (see agent/server.rs/SETUP.md) — the
@@ -55,13 +55,23 @@ let eventsSinceSleep = 0;
 let wasSleeping = false;
 
 export async function computeAmbient() {
-  const [sessions, audioSessions, micMuted, micCaptureActive, power, idleSecs] = await Promise.all([
-    invoke("list_agent_sessions").catch(() => []),
+  // Awaited here rather than only at startup, because each listener below is
+  // another entry point into this function and any of them can fire before the
+  // first load resolves. Memoized, so this costs nothing after the first call.
+  await loadTunables();
+
+  const [pending, audioSessions, micMuted, micCaptureActive, power, idleSecs] = await Promise.all([
+    // Straight from the held-open PermissionRequest hooks (agent/server.rs), so
+    // it counts a request from any terminal. It used to be a flag on one of this
+    // app's own terminal sessions, keyed by WIDGET_TERMINAL_LABEL — which meant
+    // a permission request from the user's own shell showed a card but never
+    // moved the mascot, because there was no session of ours to flag.
+    invoke("pending_permissions").catch(() => ({ count: 0, oldest_secs: 0 })),
     invoke("list_audio_sessions").catch(() => []),
     invoke("system_mic_get_muted").catch(() => true),
     // Actual mic-capture activity (Windows' AudioSessionStateActive on the
     // default INPUT device), not just "an app with a known call-app name is
-    // making sound" — the old CALL_APP_RE-only check never fired for a
+    // making sound" — the old app-name-only check never fired for a
     // browser-based call (Google Meet et al show up as chrome.exe/
     // msedge.exe, indistinguishable by name from that browser just having
     // some unrelated tab open). This generalizes past any specific app.
@@ -70,7 +80,8 @@ export async function computeAmbient() {
     invoke("get_idle_seconds").catch(() => 0),
   ]);
 
-  const audioNames = audioSessions.map((s) => s.name || "");
+  const audioNames = audioSessions.map((s) => (s.name || "").toLowerCase());
+  const matchesAny = (patterns) => audioNames.some((name) => patterns.some((p) => name.includes(p)));
   // While the voice assistant is on, micCaptureActive carries no information —
   // it is true continuously because *we* are the app capturing, so trusting it
   // would pin the mascot to "call" for as long as the wake word is armed.
@@ -78,27 +89,23 @@ export async function computeAmbient() {
   // while voice is enabled, which is the lesser of the two: a permanently wrong
   // ambient state is worse than one missed heuristic.
   const foreignCapture = micCaptureActive && !voiceHoldsMic();
-  const onCall = !micMuted && (foreignCapture || audioNames.some((n) => CALL_APP_RE.test(n)));
-  const streaming = audioNames.some((n) => STREAM_APP_RE.test(n));
+  const onCall = !micMuted && (foreignCapture || matchesAny(tNames("presence.call_apps")));
+  const streaming = matchesAny(tNames("presence.stream_apps"));
 
-  const pending = sessions.filter((s) => s.has_pending);
-  const forgotten = pending.some((s) => (s.pending_since_secs || 0) > FORGOTTEN_THRESHOLD_SECS);
-  // last_activity never clears itself (it just holds whatever the last
-  // visible line was) — without a recency check, a terminal opened once and
-  // then left alone would claim "coding" forever. ACTIVE_STALE_SECS is
-  // deliberately generous (a human reading a long tool output before
-  // reacting shouldn't flip the mascot back to idle mid-thought) but still
-  // bounded.
-  const active = sessions.filter((s) => s.agent && (s.last_activity_secs ?? Infinity) < ACTIVE_STALE_SECS);
+  const forgotten = pending.count > 0 && pending.oldest_secs > t("presence.forgotten_secs");
 
-  const lowPower = !!power && power.has_battery && !power.charging && power.percent <= LOW_BATTERY_PERCENT;
-  const sleeping = idleSecs > SLEEP_THRESHOLD_SECS;
+  const lowPower =
+    !!power && power.has_battery && !power.charging && power.percent <= t("presence.low_battery_percent");
+  const sleeping = idleSecs > t("presence.sleep_secs");
   // Checked AFTER sleeping in the chain below so a long-idle machine settles
-  // into the deeper "sleeping" pose instead of getting stuck on "break" —
-  // idleSecs growing past SLEEP_THRESHOLD_SECS is also, technically, past
-  // BREAK_THRESHOLD_SECS, so the ordering (not a range check here) is what
-  // actually stratifies the two.
-  const onBreak = idleSecs > BREAK_THRESHOLD_SECS;
+  // into the deeper "sleeping" pose instead of getting stuck on "break" — a
+  // machine idle past the sleep threshold is also, technically, past the break
+  // threshold, so the ordering (not a range check here) is what actually
+  // stratifies the two — which also means the ordering, not the numbers, decides
+  // what happens if a user sets the sleep threshold *below* the break one: sleep
+  // is tested first, so the break pose simply never appears. Harmless, and said
+  // plainly in that setting's help text rather than guarded against.
+  const onBreak = idleSecs > t("presence.break_secs");
   const recentHookActivity =
     lastHookActivitySince !== null && Date.now() - lastHookActivitySince < HOOK_ACTIVITY_CODING_WINDOW_MS;
   const recentPromptSubmit =
@@ -107,10 +114,9 @@ export async function computeAmbient() {
   let next;
   if (onCall) next = "call";
   else if (streaming) next = "streaming";
-  else if (active.length >= 2) next = "juggling";
   else if (forgotten) next = "forgotten";
-  else if (pending.length > 0) next = "waiting";
-  else if (active.length === 1 || recentHookActivity) next = "coding";
+  else if (pending.count > 0) next = "waiting";
+  else if (recentHookActivity) next = "coding";
   // Real tool activity (coding, just above) always outranks "still
   // thinking" — once a tool actually runs, that's more informative than the
   // anticipatory pose from the moment the prompt was submitted.
@@ -134,9 +140,31 @@ function markEventDuringSleep() {
   if (wasSleeping) eventsSinceSleep++;
 }
 
+// The entry point for everything that isn't the poll loop. Logging rather than
+// surfacing the failure is deliberate: presence is ambient decoration, so the
+// wrong face is a far smaller interruption than an error notice over the whole
+// widget — and an uncaught one here would be an unhandled rejection per event.
+export function refreshAmbient() {
+  return computeAmbient().catch((err) => console.error("presence signals:", err));
+}
+
+// A self-rescheduling timer rather than setInterval, because the interval is
+// itself a setting: setInterval latches its period at creation, so changing it
+// would need the timer torn down and rebuilt. Reading it per tick means the very
+// next gap reflects a change. Only ever scheduled after a successful compute, so
+// the read below cannot be the thing that throws.
+function scheduleAmbientPoll() {
+  setTimeout(() => {
+    computeAmbient()
+      .then(scheduleAmbientPoll)
+      .catch((err) => console.error("presence signals stopped:", err));
+  }, t("presence.poll_secs") * 1000);
+}
+
 window.addEventListener("DOMContentLoaded", () => {
-  computeAmbient();
-  setInterval(computeAmbient, 5000);
+  computeAmbient()
+    .then(scheduleAmbientPoll)
+    .catch((err) => console.error("presence signals never started:", err));
 
   listen("spotify-now-playing", (event) => {
     spotifyPlaying = !!(event.payload && event.payload.is_playing);
@@ -144,22 +172,22 @@ window.addEventListener("DOMContentLoaded", () => {
 
   listen("claude-hook-activity", () => {
     lastHookActivitySince = Date.now();
-    computeAmbient();
+    refreshAmbient();
   });
 
   listen("claude-user-prompt-submit", () => {
     lastPromptSubmitSince = Date.now();
-    computeAmbient();
+    refreshAmbient();
   });
 
   // A pending decision is the highest-priority, most time-sensitive ambient
   // signal there is — recomputing immediately instead of waiting for the
-  // next 5s poll tick is what makes the mascot's mood inside the permission
+  // next poll tick is what makes the mascot's mood inside the permission
   // card itself (see styles.css's mini pip icon) switch to "waiting" right
   // away instead of still showing whatever it was doing a moment before
-  // (e.g. "listening") for up to 5 seconds.
+  // (e.g. "listening") for as long as the poll interval.
   listen("mascot-permission-request", () => {
-    computeAmbient();
+    refreshAmbient();
   });
 
   listen("github-merge", () => {
