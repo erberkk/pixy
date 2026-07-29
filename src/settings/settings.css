@@ -653,7 +653,11 @@ body {
   gap: 8px;
 }
 
-.tunable-input input {
+/* Excludes the checkbox a `toggle` setting renders: that one is deliberately
+   invisible (`.switch input` sizes it to nothing and the track/thumb draw the
+   control), and this rule sits later in the file, so without the exclusion it
+   would win on equal specificity and turn every switch into a text box. */
+.tunable-input input:not([type="checkbox"]) {
   /* Same treatment as `.field input`, which only applies inside a .field. */
   width: 108px;
   background: #1c1c1c;
@@ -675,7 +679,7 @@ body {
   font-variant-numeric: normal;
 }
 
-.tunable-input input:focus {
+.tunable-input input:not([type="checkbox"]):focus {
   border-color: #e8b04b;
   box-shadow: 0 0 0 3px rgba(232, 176, 75, 0.15);
 }
@@ -728,4 +732,83 @@ body {
    you-must-also-edit-your-hooks warning it sits under. */
 .tunable-port-note.ok {
   color: #5fa876;
+}
+
+/* --- Memory section ------------------------------------------------------- */
+
+/* What the index actually holds. Sits above the settings rather than below,
+   because "is this doing anything?" is the first question the section has to
+   answer, and two empty text boxes answer it badly. */
+.memory-status {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.memory-line {
+  font-size: 12px;
+  line-height: 1.5;
+  color: #888;
+  padding-left: 14px;
+  position: relative;
+}
+
+.memory-line::before {
+  content: "•";
+  position: absolute;
+  left: 0;
+  color: #555;
+}
+
+.memory-line.ok {
+  color: #bbb;
+}
+
+.memory-line.ok::before {
+  content: "✓";
+  color: #5fa876;
+}
+
+.memory-line.bad {
+  color: #e8b04b;
+}
+
+.memory-line.bad::before {
+  content: "!";
+  color: #e8b04b;
+}
+
+/* The path and its buttons on one line. The path itself shrinks and ellipsizes
+   rather than wrapping — these are long Windows paths, and a wrapped one pushes
+   the buttons around every time the folder changes. The full path is on the
+   title attribute for when the visible part isn't enough. */
+.chats-dir-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chats-dir-row code {
+  flex: 1;
+  min-width: 0;
+  background: #1c1c1c;
+  border: 1px solid #2a2a2a;
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: #bbb;
+  font-size: 11px;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* This section has no group headings — it is one subject, so the h4 the
+   generated form emits per group would be a title repeating the tab name. */
+#memoryTunables .tunable:first-child {
+  border-top: none;
+  padding-top: 0;
 }

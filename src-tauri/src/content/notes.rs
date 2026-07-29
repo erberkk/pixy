@@ -171,26 +171,32 @@ pub fn get_notes_dir(app: tauri::AppHandle) -> String {
 }
 
 #[tauri::command]
-pub fn choose_notes_dir(app: tauri::AppHandle) -> Option<String> {
-    let picked = app.dialog().file().blocking_pick_folder()?;
-    let path = picked.into_path().ok()?;
-    set_notes_dir(&app, &path);
-    Some(path.to_string_lossy().to_string())
+pub async fn choose_notes_dir(app: tauri::AppHandle) -> Option<String> {
+    crate::offload(move || {
+        let picked = app.dialog().file().blocking_pick_folder()?;
+        let path = picked.into_path().ok()?;
+        set_notes_dir(&app, &path);
+        Some(path.to_string_lossy().to_string())
+})
+    .await
 }
 
 #[tauri::command]
-pub fn open_external_file(app: tauri::AppHandle) -> Option<Note> {
-    let picked = app
-        .dialog()
-        .file()
-        .add_filter("Notes", &["md", "txt"])
-        .blocking_pick_file()?;
-    let path = picked.into_path().ok()?;
-    let mut meta_store = read_meta(&app);
-    let note = note_from_file(&path, &mut meta_store)?;
-    write_meta(&app, &meta_store);
-    track_external_file(&app, &path);
-    Some(note)
+pub async fn open_external_file(app: tauri::AppHandle) -> Option<Note> {
+    crate::offload(move || {
+        let picked = app
+            .dialog()
+            .file()
+            .add_filter("Notes", &["md", "txt"])
+            .blocking_pick_file()?;
+        let path = picked.into_path().ok()?;
+        let mut meta_store = read_meta(&app);
+        let note = note_from_file(&path, &mut meta_store)?;
+        write_meta(&app, &meta_store);
+        track_external_file(&app, &path);
+        Some(note)
+})
+    .await
 }
 
 // Used for drag-and-drop: the frontend gets the dropped file's absolute

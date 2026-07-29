@@ -590,6 +590,8 @@ function normalizeNames(text) {
 }
 
 function readTunableInput(setting, input) {
+  if (setting.kind === "toggle") return input.checked;
+  if (setting.kind === "text") return input.value.trim();
   if (setting.kind === "names") return normalizeNames(input.value);
   // An empty or unparseable number field reads as the default rather than 0:
   // clearing a field means "I don't want to set this", not "zero".
@@ -670,17 +672,33 @@ function buildTunableRow(setting, value) {
   const inputRow = document.createElement("div");
   inputRow.className = "tunable-input";
   const input = document.createElement("input");
-  if (setting.kind === "names") {
-    input.type = "text";
-    input.placeholder = setting.default;
+  if (setting.kind === "toggle") {
+    // Same switch markup the rest of the settings window uses, so an on/off
+    // setting looks like every other on/off setting rather than like a number
+    // field that happens to accept two values.
+    input.type = "checkbox";
+    input.checked = !!value;
+    const track = document.createElement("span");
+    track.className = "switch";
+    track.appendChild(input);
+    track.insertAdjacentHTML("beforeend", '<span class="switch-track"><span class="switch-thumb"></span></span>');
+    inputRow.appendChild(track);
   } else {
-    input.type = "number";
-    input.min = setting.min;
-    input.max = setting.max;
-    input.step = setting.step;
+    if (setting.kind === "names" || setting.kind === "text") {
+      input.type = "text";
+      // A `text` setting's default is often empty (that is how an optional
+      // connection setting says "not configured"), so the schema carries a
+      // separate example to show in the box.
+      input.placeholder = setting.placeholder || setting.default;
+    } else {
+      input.type = "number";
+      input.min = setting.min;
+      input.max = setting.max;
+      input.step = setting.step;
+    }
+    input.value = value;
+    inputRow.appendChild(input);
   }
-  input.value = value;
-  inputRow.appendChild(input);
 
   if (setting.unit) {
     const unit = document.createElement("span");
@@ -693,9 +711,11 @@ function buildTunableRow(setting, value) {
   reset.className = "tunable-reset";
   reset.type = "button";
   reset.textContent = "↺";
-  reset.title = `Back to the default (${setting.default})`;
+  const defaultLabel = setting.kind === "toggle" ? (setting.default ? "on" : "off") : setting.default;
+  reset.title = `Back to the default (${defaultLabel})`;
   reset.addEventListener("click", () => {
-    input.value = setting.default;
+    if (setting.kind === "toggle") input.checked = !!setting.default;
+    else input.value = setting.default;
     refreshTunableRow(setting, row, input);
     clearStatus(el("advancedStatus"));
   });
@@ -709,49 +729,125 @@ function buildTunableRow(setting, value) {
 
   if (setting.id === "network.event_port") renderEventPortNote(row, input);
 
-  input.addEventListener("input", () => {
-    refreshTunableRow(setting, row, input);
-    clearStatus(el("advancedStatus"));
-  });
+  // Both events: a text or number field reports "input" as it is typed, while a
+  // checkbox is only reliably reported by "change".
+  for (const event of ["input", "change"]) {
+    input.addEventListener(event, () => {
+      refreshTunableRow(setting, row, input);
+      clearStatus(el("advancedStatus"));
+    });
+  }
   refreshTunableRow(setting, row, input);
   return row;
 }
+
+// The Memory group has its own section in the sidebar, because it is a feature
+// rather than a pile of numbers — so Advanced leaves it out instead of showing
+// every field twice.
+const MEMORY_GROUP = "Memory";
 
 async function loadTunableSettings() {
   const payload = await invoke("get_tunables");
   tunableSchema = payload.settings;
   tunableDefaults = Object.fromEntries(payload.settings.map((s) => [s.id, s.default]));
 
-  const container = el("tunableGroups");
-  container.innerHTML = "";
+  const advanced = el("tunableGroups");
+  const memory = el("memoryTunables");
+  advanced.innerHTML = "";
+  memory.innerHTML = "";
+
   // Grouped in the order the backend declares, so related settings stay together
   // and the form's shape is decided next to the values rather than here.
   for (const group of payload.groups) {
     const block = document.createElement("div");
     block.className = "tunable-group";
-    const heading = document.createElement("h4");
-    heading.textContent = group;
-    block.appendChild(heading);
+    if (group !== MEMORY_GROUP) {
+      const heading = document.createElement("h4");
+      heading.textContent = group;
+      block.appendChild(heading);
+    }
     for (const setting of payload.settings.filter((s) => s.group === group)) {
       block.appendChild(buildTunableRow(setting, payload.values[setting.id]));
     }
-    container.appendChild(block);
+    (group === MEMORY_GROUP ? memory : advanced).appendChild(block);
   }
+}
+
+// What the index holds, and whether meaning search is actually working. Without
+// it the section is two text boxes with no way to tell "set up correctly" from
+// "quietly doing nothing".
+async function loadMemoryStatus() {
+  const box = el("memoryStatus");
+  const status = await invoke("recall_status").catch(() => null);
+  if (!status) {
+    box.innerHTML = '<div class="memory-line bad">Couldn\'t read the index.</div>';
+    return;
+  }
+
+  const lines = [];
+  lines.push(
+    `<div class="memory-line">${status.turns} exchange${status.turns === 1 ? "" : "s"} indexed` +
+      ` across ${status.chats} conversation${status.chats === 1 ? "" : "s"}.</div>`
+  );
+  // Counted separately from conversations because they come from somewhere else
+  // entirely — Claude Code's own notes, which this app reads and never writes.
+  if (status.notes > 0) {
+    lines.push(
+      `<div class="memory-line">Plus ${status.notes} of Claude Code's own note${status.notes === 1 ? "" : "s"}` +
+        " — the ones the Memory graph in the workspace shows.</div>"
+    );
+  }
+
+  if (status.problem) {
+    lines.push(`<div class="memory-line bad">${escapeHtml(status.problem)}</div>`);
+  } else if (status.embedded > 0 && status.similarity_floor > 0) {
+    // Out of `units`, not `turns` — turns counts conversation exchanges only,
+    // while everything indexed gets a vector, notes included.
+    lines.push(
+      `<div class="memory-line ok">${status.embedded} of ${status.units} can also be found by meaning` +
+        ` (${escapeHtml(status.vector_model)}, related above ${status.similarity_floor.toFixed(2)}).</div>`
+    );
+  } else if (status.embedded > 0) {
+    // Configured and embedded, but there is not enough history yet to measure
+    // what "unrelated" looks like for this model — and a threshold guessed
+    // without that either matches everything or nothing.
+    lines.push(
+      `<div class="memory-line">${status.embedded} entr${status.embedded === 1 ? "y" : "ies"} embedded with` +
+        ` ${escapeHtml(status.vector_model)}. Meaning search switches on once there is enough history to` +
+        " measure how close counts as related — a few more conversations.</div>"
+    );
+  } else {
+    // The honest description of the default: it works, it just works on words.
+    lines.push(
+      '<div class="memory-line">Found by the words they used. Fill in a server and model below to also' +
+        " find conversations that made the same point in different words.</div>"
+    );
+  }
+  box.innerHTML = lines.join("");
+}
+
+function escapeHtml(text) {
+  return String(text).replace(
+    /[&<>"']/g,
+    (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]
+  );
 }
 
 // Sends every setting, with null for the ones sitting on their default — that is
 // what removes an override, so config.json only ever holds what the user actually
 // changed and a future change to a default reaches anyone who never touched it.
-async function saveTunableSettings() {
+// Both sections edit one set of values, so saving from either sends all of them
+// — a form split across two places must not let one half overwrite the other
+// with whatever it happened to be showing.
+async function saveTunableSettings(status) {
   const values = {};
   for (const setting of tunableSchema) {
-    const input = el("tunableGroups").querySelector(`.tunable[data-id="${setting.id}"] input`);
+    const input = document.querySelector(`.tunable[data-id="${setting.id}"] input`);
     if (!input) continue;
     const value = readTunableInput(setting, input);
     values[setting.id] = isAtDefault(setting, value) ? null : value;
   }
 
-  const status = el("advancedStatus");
   setStatus(status, "pending", "Saving…");
   try {
     await invoke("save_tunables", { values });
@@ -759,12 +855,66 @@ async function saveTunableSettings() {
     // app-name lists, so what is stored isn't always character-for-character
     // what was typed.
     await loadTunableSettings();
+    loadMemoryStatus();
     const restarts = tunableSchema.filter((s) => s.restart && values[s.id] !== null);
     setStatus(
       status,
       "ok",
       restarts.length > 0 ? "Saved — restart the widget to apply the event port." : "Saved."
     );
+  } catch (err) {
+    setStatus(status, "error", String(err));
+  }
+}
+
+async function loadChatsDir() {
+  const info = await invoke("get_chats_dir").catch(() => null);
+  if (!info) return;
+  const path = el("chatsDirPath");
+  path.textContent = info.dir;
+  path.title = info.dir;
+  // Reset is only meaningful when there is something to reset to — offering it
+  // on the built-in location would be a button that does nothing.
+  el("chatsDirResetBtn").hidden = info.is_default;
+}
+
+// Reports what actually happened to the files rather than just the new path: a
+// skipped or failed file means the history is now split across two folders, and
+// only the user can decide what to do about that.
+function describeChatsDirChange(change) {
+  const parts = [];
+  if (change.moved > 0) parts.push(`moved ${change.moved} conversation${change.moved === 1 ? "" : "s"}`);
+  if (change.skipped > 0) parts.push(`left ${change.skipped} behind (already there)`);
+  if (change.failed.length > 0) parts.push(`couldn't move ${change.failed.length}: ${change.failed.join(", ")}`);
+  if (parts.length === 0) return "Nothing to move.";
+  return parts.join("; ") + ".";
+}
+
+async function changeChatsDir(command) {
+  const status = el("chatsDirStatus");
+  setStatus(status, "pending", "Moving…");
+  try {
+    const change = await invoke(command);
+    // Cancelling the folder picker returns nothing — not an error, and not
+    // something to report as one.
+    if (!change) return clearStatus(status);
+    await loadChatsDir();
+    // The index reconciles on its own thread after the move, so the counts are
+    // read back once it has had a chance to notice.
+    setTimeout(loadMemoryStatus, 800);
+    setStatus(status, change.failed.length > 0 ? "error" : "ok", describeChatsDirChange(change));
+  } catch (err) {
+    setStatus(status, "error", String(err));
+  }
+}
+
+async function rebuildRecallIndex() {
+  const status = el("memorySettingsStatus");
+  setStatus(status, "pending", "Rebuilding…");
+  try {
+    const stats = await invoke("recall_reindex");
+    await loadMemoryStatus();
+    setStatus(status, "ok", `Indexed ${stats.total} exchange${stats.total === 1 ? "" : "s"}.`);
   } catch (err) {
     setStatus(status, "error", String(err));
   }
@@ -778,6 +928,7 @@ async function resetAllTunables() {
       values: Object.fromEntries(tunableSchema.map((s) => [s.id, null])),
     });
     await loadTunableSettings();
+    loadMemoryStatus();
     setStatus(status, "ok", "Everything is back to its default.");
   } catch (err) {
     setStatus(status, "error", String(err));
@@ -793,7 +944,10 @@ window.addEventListener("DOMContentLoaded", async () => {
   sttSection.load();
   ttsSection.load();
   loadVoiceSettings();
-  loadTunableSettings().catch((err) => setStatus(el("advancedStatus"), "error", String(err)));
+  loadChatsDir();
+  loadTunableSettings()
+    .then(loadMemoryStatus)
+    .catch((err) => setStatus(el("advancedStatus"), "error", String(err)));
   const token = await loadGithubConfig();
   if (token) refreshReport();
 
@@ -838,8 +992,12 @@ window.addEventListener("DOMContentLoaded", async () => {
     invoke("set_voice_threshold", { threshold: Number(e.target.value) });
   });
 
-  el("advancedSaveBtn").addEventListener("click", saveTunableSettings);
+  el("advancedSaveBtn").addEventListener("click", () => saveTunableSettings(el("advancedStatus")));
   el("advancedResetBtn").addEventListener("click", resetAllTunables);
+  el("memorySaveBtn").addEventListener("click", () => saveTunableSettings(el("memorySettingsStatus")));
+  el("memoryReindexBtn").addEventListener("click", rebuildRecallIndex);
+  el("chatsDirChangeBtn").addEventListener("click", () => changeChatsDir("choose_chats_dir"));
+  el("chatsDirResetBtn").addEventListener("click", () => changeChatsDir("reset_chats_dir"));
 
   el("titlebar-close").addEventListener("click", () => {
     invoke("hide_settings");

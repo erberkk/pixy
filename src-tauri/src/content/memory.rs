@@ -14,12 +14,15 @@ use crate::config::{read_config, write_config};
 // the small YAML-like frontmatter block + [[links]] it already puts in
 // them, and hand back a flat list for the frontend to lay out as a graph.
 
+// Fields are pub(crate) because ai/recall.rs indexes these files too — the
+// graph in the Workspace window shows them, and recall makes them findable
+// from a question. Same files, two readers, still no writer.
 #[derive(Serialize, Clone)]
 pub struct MemoryNode {
     // Frontmatter's `name:` slug — the stable id [[links]] reference, and
     // what ties a node to its incoming edges regardless of filename.
-    name: String,
-    description: String,
+    pub(crate) name: String,
+    pub(crate) description: String,
     // Frontmatter's metadata.type (user/feedback/project/reference) when
     // present; real files in the wild also use the older `node_type` key or
     // omit it entirely, so this tolerantly falls back to "note".
@@ -27,16 +30,16 @@ pub struct MemoryNode {
     node_type: String,
     // Raw markdown body (frontmatter stripped) — rendered client-side with
     // the same markdownToHtml the regular notes editor already uses.
-    body: String,
+    pub(crate) body: String,
     // Other memories' `name:` slugs this one's body references via
     // [[name]] — may point at a slug with no matching file (a memory not
     // written yet, or renamed); the frontend renders those as ghost nodes
     // rather than silently dropping the edge, matching Obsidian's own
     // unresolved-link convention.
     links: Vec<String>,
-    project: String,
-    file_path: String,
-    updated_at: u64,
+    pub(crate) project: String,
+    pub(crate) file_path: String,
+    pub(crate) updated_at: u64,
 }
 
 fn home_dir() -> Option<PathBuf> {
@@ -59,12 +62,10 @@ fn default_projects_root() -> Option<PathBuf> {
 // project's absolute path into its ~/.claude/projects/ directory name by
 // replacing path separators with hyphens; the last non-empty segment is the
 // original folder's own name, which is all a human needs to tell projects
-// apart in this UI (the full slug is still kept as `project` for filtering,
-// this is only used for anything wanting a short label — currently none of
-// the Rust side, but kept here as the one place this logic should live if
-// the frontend ever wants it pre-computed instead of re-deriving it itself).
-#[allow(dead_code)]
-fn prettify_project_slug(slug: &str) -> String {
+// apart. The full slug is still kept as `project` for filtering; this is the
+// short label, used when a recalled note has to say which project it came
+// from (see ai/recall.rs's NoteSource).
+pub(crate) fn prettify_project_slug(slug: &str) -> String {
     slug.rsplit('-').find(|s| !s.is_empty()).unwrap_or(slug).to_string()
 }
 
@@ -213,14 +214,18 @@ fn scan_root(root: &Path, nodes: &mut Vec<MemoryNode>) {
     }
 }
 
-#[tauri::command]
-pub fn list_memories(app: tauri::AppHandle) -> Vec<MemoryNode> {
+/// Every memory file under the default root and any extra ones, deduplicated.
+///
+/// Shared with ai/recall.rs rather than re-scanned there: which directories
+/// count, what shape they have to be in, and which duplicate wins are all
+/// decisions that belong in one place, and a second copy of them would drift.
+pub(crate) fn all_memories(app: &tauri::AppHandle) -> Vec<MemoryNode> {
     let mut nodes = Vec::new();
 
     if let Some(root) = default_projects_root() {
         scan_root(&root, &mut nodes);
     }
-    for extra in read_config(&app).memory_extra_roots {
+    for extra in read_config(app).memory_extra_roots {
         scan_root(&PathBuf::from(extra), &mut nodes);
     }
 
@@ -241,6 +246,14 @@ pub fn list_memories(app: tauri::AppHandle) -> Vec<MemoryNode> {
 
     nodes.sort_by(|a, b| a.project.cmp(&b.project).then(a.name.cmp(&b.name)));
     nodes
+}
+
+#[tauri::command]
+pub async fn list_memories(app: tauri::AppHandle) -> Vec<MemoryNode> {
+    crate::offload(move || {
+        all_memories(&app)
+})
+    .await
 }
 
 #[derive(Serialize)]
@@ -268,16 +281,19 @@ pub fn get_memory_roots(app: tauri::AppHandle) -> MemoryRoots {
 // backup, a second OS user profile, or any other copy of Claude Code's own
 // project/memory layout the default root wouldn't otherwise reach.
 #[tauri::command]
-pub fn add_memory_root(app: tauri::AppHandle) -> Option<String> {
-    let picked = app.dialog().file().blocking_pick_folder()?;
-    let path = picked.into_path().ok()?.to_string_lossy().to_string();
+pub async fn add_memory_root(app: tauri::AppHandle) -> Option<String> {
+    crate::offload(move || {
+        let picked = app.dialog().file().blocking_pick_folder()?;
+        let path = picked.into_path().ok()?.to_string_lossy().to_string();
 
-    let mut cfg = read_config(&app);
-    if !cfg.memory_extra_roots.contains(&path) {
-        cfg.memory_extra_roots.push(path.clone());
-        write_config(&app, &cfg);
-    }
-    Some(path)
+        let mut cfg = read_config(&app);
+        if !cfg.memory_extra_roots.contains(&path) {
+            cfg.memory_extra_roots.push(path.clone());
+            write_config(&app, &cfg);
+        }
+        Some(path)
+})
+    .await
 }
 
 #[tauri::command]

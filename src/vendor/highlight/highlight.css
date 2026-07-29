@@ -1,0 +1,104 @@
+/* Syntax colours for the vendored highlight.js, written against this app's own
+   palette rather than imported from one of its shipped themes.
+   A stock theme would bring its own background, greys and accent, and a code
+   block that does not match the window it sits in is the thing that makes
+   embedded highlighting look bolted on.
+
+   The class names are highlight.js's; the colours are ours. Kept to a small
+   number of hues on purpose: an IDE distinguishes roughly six things at a
+   glance, and colouring twenty token types differently reads as noise. */
+
+.hljs {
+  color: var(--text);
+  background: none;
+}
+
+/* Keywords, operators, and anything that is language rather than content —
+   the accent, because it is the app's one strong colour and keywords are what
+   the eye should land on first. */
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-literal,
+.hljs-doctag,
+.hljs-meta .hljs-keyword {
+  color: #e8b04b;
+}
+
+/* Strings and anything quoted. Green reads as "data, not code" in every
+   editor theme people are used to. */
+.hljs-string,
+.hljs-regexp,
+.hljs-addition,
+.hljs-attribute,
+.hljs-meta .hljs-string {
+  color: #8fc98f;
+}
+
+/* Numbers and constants. */
+.hljs-number,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-quote,
+.hljs-link {
+  color: #d99ad9;
+}
+
+/* Names of things being defined or called. */
+.hljs-title,
+.hljs-title.class_,
+.hljs-title.function_,
+.hljs-section,
+.hljs-name,
+.hljs-selector-id,
+.hljs-selector-class {
+  color: #7fb6e8;
+}
+
+/* Types, classes, built-ins. */
+.hljs-type,
+.hljs-built_in,
+.hljs-class .hljs-title,
+.hljs-params,
+.hljs-template-variable {
+  color: #6fc7c2;
+}
+
+/* Variables, properties, attributes — deliberately close to plain text, since
+   most identifiers in a file are these and colouring them all fights the
+   tokens above for attention. */
+.hljs-variable,
+.hljs-property,
+.hljs-attr,
+.hljs-selector-attr,
+.hljs-selector-pseudo,
+.hljs-template-tag {
+  color: #cfcfcb;
+}
+
+/* Comments and anything else the reader can skip. Dim, and italic, so they
+   read as annotation rather than instruction. */
+.hljs-comment,
+.hljs-meta,
+.hljs-deletion {
+  color: var(--text-dim);
+  font-style: italic;
+}
+
+/* Diff markers keep their conventional red/green even inside a comment-ish
+   context, because in a diff they are the content. */
+.hljs-addition {
+  color: #8fc98f;
+}
+
+.hljs-deletion {
+  color: #d98a8a;
+  font-style: normal;
+}
+
+.hljs-emphasis {
+  font-style: italic;
+}
+
+.hljs-strong {
+  font-weight: 700;
+}

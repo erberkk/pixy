@@ -63,9 +63,12 @@ pub(crate) fn fetch_username(token: &str) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub fn test_github_connection(token: String) -> Result<String, String> {
-    let login = fetch_username(&token)?;
-    Ok(format!("Connected: @{login}"))
+pub async fn test_github_connection(token: String) -> Result<String, String> {
+    crate::offload(move || {
+        let login = fetch_username(&token)?;
+        Ok(format!("Connected: @{login}"))
+})
+    .await
 }
 
 #[derive(Serialize, Clone)]
@@ -177,14 +180,17 @@ pub(crate) fn search_issues(token: &str, query: &str) -> Result<Vec<GithubItem>,
 }
 
 #[tauri::command]
-pub fn get_github_report(token: String) -> Result<GithubReport, String> {
-    let token = token.trim();
-    if token.is_empty() {
-        return Err("No GitHub token configured yet.".to_string());
-    }
-    let issues = search_issues(token, "is:issue is:open assignee:@me")?;
-    let pull_requests = search_issues(token, "is:pr is:open author:@me")?;
-    Ok(GithubReport { issues, pull_requests })
+pub async fn get_github_report(token: String) -> Result<GithubReport, String> {
+    crate::offload(move || {
+        let token = token.trim();
+        if token.is_empty() {
+            return Err("No GitHub token configured yet.".to_string());
+        }
+        let issues = search_issues(token, "is:issue is:open assignee:@me")?;
+        let pull_requests = search_issues(token, "is:pr is:open author:@me")?;
+        Ok(GithubReport { issues, pull_requests })
+})
+    .await
 }
 
 #[tauri::command]

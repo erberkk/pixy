@@ -38,6 +38,10 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12h2l2-5 2 10 2-13 2 16 2-13 2 10 2-5h2"/></svg>
           <span>Voice</span>
         </button>
+        <button class="hub-nav-item" data-section="memory">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3a4 4 0 00-4 4v1a3 3 0 00-3 3v2a3 3 0 003 3v1a4 4 0 008 0v-1a3 3 0 003-3v-2a3 3 0 00-3-3V7a4 4 0 00-4-4z"/><path d="M12 3v18M8 8h1M15 8h1M8 16h1M15 16h1"/></svg>
+          <span>Memory</span>
+        </button>
         <button class="hub-nav-item" data-section="advanced">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg>
           <span>Advanced</span>
@@ -332,6 +336,56 @@
             also fires on things that only sound like it. Raise it if it triggers
             by itself; lower it if it keeps missing you.
           </p>
+        </section>
+
+        <section class="hub-section" id="section-memory">
+          <p class="hint">
+            Conversations you have already had, made findable from the ones you
+            have next. Ask about something discussed last week and the relevant
+            part of it is quietly added to your question &mdash; typed or spoken,
+            either one can reach the other. Nothing is added when nothing is
+            relevant, which is most of the time.
+          </p>
+
+          <div class="memory-status" id="memoryStatus"></div>
+
+          <div class="actions">
+            <button class="btn" id="memoryReindexBtn">Rebuild index</button>
+          </div>
+
+          <div class="panel-divider"></div>
+
+          <!-- Where the conversation files themselves live. Here rather than in
+               Advanced because it is a path, not a number, and because it is the
+               thing everything above is an index over. -->
+          <div class="field">
+            <span>Conversation files</span>
+            <p class="hint subtle">
+              One JSON file per conversation. Move them somewhere you back up if
+              you want to keep them &mdash; the files come with you. The search
+              index stays with the app either way, since it is only a cache and
+              is rebuilt from these files.
+            </p>
+            <div class="chats-dir-row">
+              <code id="chatsDirPath"></code>
+              <button class="btn small" id="chatsDirChangeBtn">Change&hellip;</button>
+              <button class="btn small" id="chatsDirResetBtn" hidden>Reset</button>
+            </div>
+          </div>
+          <div class="status" id="chatsDirStatus"></div>
+
+          <div class="panel-divider"></div>
+
+          <!-- The same generated rows as the Advanced section, filtered to this
+               group: one schema (src-tauri/src/tunables.rs), one renderer, two
+               places to show them. -->
+          <div id="memoryTunables"></div>
+
+          <div class="status" id="memorySettingsStatus"></div>
+
+          <div class="actions">
+            <button class="btn primary" id="memorySaveBtn">Save</button>
+          </div>
         </section>
 
         <section class="hub-section" id="section-advanced">

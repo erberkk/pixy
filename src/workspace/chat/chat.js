@@ -4,7 +4,7 @@
 // agent/server.rs — this is a plain user <-> local-model chat.
 import { initPip, setPipState } from "../../mascot/pip/pip.js";
 import { invoke, listen } from "../../shared/tauri.js";
-import { escapeHtml, markdownToHtml } from "../../shared/markdown.js";
+import { bindCopyButton, copyText, escapeHtml, markdownToHtml } from "../../shared/markdown.js";
 import { timeAgo } from "../../shared/format.js";
 import { showToast } from "../lib/toast.js";
 import {
@@ -31,7 +31,12 @@ let streamingChatId = null; // which chat a reply is currently streaming into
 let streamingText = "";
 let sendingMessage = false;
 let chatModeInited = false;
-let pendingAttachment = null; // {name, kind: "image"|"text"|"unsupported", mime, data} from pick_chat_attachment
+// Attachments staged for the next message, in the order they were picked.
+// A list rather than one, because a question is often about several files at
+// once ("compare these two") and attaching them one message at a time loses
+// exactly the comparison. Each entry is a ChatAttachment from
+// pick_chat_attachment — see ai/chat.rs for the shape.
+let pendingAttachments = [];
 
 async function loadLlmProfiles() {
   const settings = await invoke("get_llm_settings");
@@ -91,6 +96,77 @@ async function loadChatsList() {
   renderChatList();
 }
 
+// --- sidebar search -----------------------------------------------------------
+//
+// Two kinds of match, shown separately because they answer different questions:
+// a title match is what the user named the conversation, and a message match is
+// something said inside one. Titles are filtered here from the list already in
+// memory (instant, no round trip); messages come from the search index, which
+// is the only thing that knows what is inside a conversation without reading
+// every file (see recall.rs's search_chats).
+
+let chatQuery = "";
+// Chat ids that matched on content but not on title, with the line that matched.
+let contentMatches = [];
+let contentSearchToken = 0;
+
+function titleMatches(chat, query) {
+  return (chat.title || "New chat").toLowerCase().includes(query);
+}
+
+async function runChatSearch(raw) {
+  chatQuery = raw.trim().toLowerCase();
+  // Each run gets a token, and a late reply from an earlier keystroke is
+  // discarded — otherwise a slow query for "ca" can land after "caching" and
+  // replace the newer results with older ones.
+  const token = ++contentSearchToken;
+  if (chatQuery.length < 2) {
+    contentMatches = [];
+    renderChatList();
+    return;
+  }
+  renderChatList(); // show the title matches immediately
+  // Logged rather than swallowed: an empty result and a broken query look
+  // identical in the sidebar, and that is exactly how a query that could not
+  // even be prepared went unnoticed once already.
+  const hits = await invoke("search_chats", { query: raw.trim(), limit: 20 }).catch((err) => {
+    console.error("chat search failed", err);
+    return [];
+  });
+  if (token !== contentSearchToken) return;
+  const titleMatched = new Set(chats.filter((c) => titleMatches(c, chatQuery)).map((c) => c.id));
+  contentMatches = hits.filter((h) => !titleMatched.has(h.chat_id));
+  renderChatList();
+}
+
+function chatItemHtml(chat, snippet) {
+  return (
+    '<div class="chat-item ' +
+    (chat.id === activeChatId ? "active" : "") +
+    '" data-id="' +
+    chat.id +
+    '">' +
+    '<div class="chat-item-title">' +
+    escapeHtml(chat.title || "New chat") +
+    "</div>" +
+    (snippet ? '<div class="chat-item-snippet">' + escapeHtml(snippet) + "</div>" : "") +
+    '<span class="chat-item-meta">' +
+    timeAgo(chat.updated_at) +
+    // No count when it isn't known (a search hit for a conversation the sidebar
+    // list has not caught up with) rather than "null msgs".
+    (chat.message_count === null
+      ? ""
+      : " · " + chat.message_count + (chat.message_count === 1 ? " msg" : " msgs")) +
+    "</span>" +
+    '<button class="chat-item-delete" data-id="' +
+    chat.id +
+    '" title="Delete chat">' +
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6h14z"/><path d="M10 11v6M14 11v6"/></svg>' +
+    "</button>" +
+    "</div>"
+  );
+}
+
 function renderChatList() {
   const count = chats.length;
   notesCount.textContent = count + (count === 1 ? " chat" : " chats");
@@ -100,31 +176,35 @@ function renderChatList() {
     return;
   }
 
-  chatListEl.innerHTML = chats
-    .map(
-      (c) =>
-        '<div class="chat-item ' +
-        (c.id === activeChatId ? "active" : "") +
-        '" data-id="' +
-        c.id +
-        '">' +
-        '<div class="chat-item-title">' +
-        escapeHtml(c.title || "New chat") +
-        "</div>" +
-        '<span class="chat-item-meta">' +
-        timeAgo(c.updated_at) +
-        " · " +
-        c.message_count +
-        (c.message_count === 1 ? " msg" : " msgs") +
-        "</span>" +
-        '<button class="chat-item-delete" data-id="' +
-        c.id +
-        '" title="Delete chat">' +
-        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6h14z"/><path d="M10 11v6M14 11v6"/></svg>' +
-        "</button>" +
-        "</div>"
-    )
-    .join("");
+  if (chatQuery) {
+    const byTitle = chats.filter((c) => titleMatches(c, chatQuery));
+    let html = byTitle.map((c) => chatItemHtml(c, "")).join("");
+    if (contentMatches.length) {
+      html +=
+        '<div class="chat-list-group">In messages</div>' +
+        contentMatches
+          .map((hit) => {
+            // Prefers the sidebar's own summary for the message count, but falls
+            // back to the hit itself. Dropping the row when the summary is
+            // missing looked like "no matches" for a conversation the index had
+            // definitely found — the list is loaded once and the index is
+            // updated in the background, so the two can disagree.
+            const chat = chats.find((c) => c.id === hit.chat_id) || {
+              id: hit.chat_id,
+              title: hit.chat_title,
+              updated_at: hit.ts_end,
+              message_count: null,
+            };
+            return chatItemHtml(chat, hit.snippet);
+          })
+          .join("");
+    }
+    chatListEl.innerHTML =
+      html || '<div class="chat-empty-list">Nothing matches.<br>Try fewer words.</div>';
+    return;
+  }
+
+  chatListEl.innerHTML = chats.map((c) => chatItemHtml(c, "")).join("");
 
   chatListEl.querySelectorAll(".chat-item").forEach((row) => {
     row.addEventListener("click", (e) => {
@@ -145,9 +225,13 @@ async function openChat(id) {
   if (!chat) return;
   activeChatId = chat.id;
   activeChatMessages = chat.messages || [];
+  // Indexes belong to the conversation that was open — carrying them across
+  // would pin a recall note to whatever message happens to sit at that position
+  // in the next one.
+  recalledByIndex = new Map();
   chatTitleInput.value = chat.title || "";
-  pendingAttachment = null;
-  renderPendingAttachment();
+  pendingAttachments = [];
+  renderPendingAttachments();
   if (chat.profile_id && llmProfiles.some((p) => p.id === chat.profile_id)) {
     activeLlmProfileId = chat.profile_id;
     chatModelSelect.value = chat.profile_id;
@@ -159,9 +243,10 @@ async function openChat(id) {
 function newChat() {
   activeChatId = null;
   activeChatMessages = [];
+  recalledByIndex = new Map();
   chatTitleInput.value = "";
-  pendingAttachment = null;
-  renderPendingAttachment();
+  pendingAttachments = [];
+  renderPendingAttachments();
   chatMessagesEl.innerHTML = "";
   chatMainEl.classList.remove("has-active");
   renderChatList();
@@ -175,6 +260,92 @@ async function deleteChat(id) {
   renderChatList();
 }
 
+// Which earlier conversations were recalled for a given message index, this
+// session only. Deliberately not saved into the chat file: it is an explanation
+// of one answer, not part of the conversation, and persisting it would grow
+// every chat with bookkeeping nobody reads back.
+let recalledByIndex = new Map();
+
+function recallNoteHtml(index) {
+  const hits = recalledByIndex.get(index);
+  if (!hits?.length) return "";
+  // Shown because a model referring to something the user cannot see reads as
+  // the model making it up. Naming the conversation and the date makes it
+  // checkable.
+  const items = hits
+    .map((h) => {
+      const when = new Date(h.ts_end).toISOString().slice(0, 10);
+      // A hit can be one of Claude Code's own notes rather than an earlier
+      // conversation — labelled, because "checkable" means the user can go and
+      // find the thing, and those two live in completely different places.
+      const kind = h.source === "memory" ? "note " : "";
+      return escapeHtml(`${kind}${h.chat_title} · ${when}`);
+    })
+    .join(", ");
+  return `<div class="chat-recall-note" title="Added to this question from your earlier conversations">↩ ${items}</div>`;
+}
+
+// Cards for the files attached to a saved message. Same look as the pending
+// cards above the composer, so a file looks the same before and after sending.
+function messageAttachmentsHtml(message, index) {
+  const attachments = message.attachments || [];
+  if (!attachments.length) return "";
+  const cards = attachments
+    .map((a, at) => {
+      const lines = a.text ? a.text.split("\n").length : 0;
+      const detail =
+        a.kind === "image"
+          ? "image"
+          : `${lines.toLocaleString()} line${lines === 1 ? "" : "s"}` +
+            (a.full_chars > a.text.length ? " · truncated" : "");
+      // An image's bytes are not persisted, so there is nothing to open — only
+      // text attachments are clickable, and the card says so by not offering it.
+      const clickable = a.kind !== "image" && a.text;
+      return (
+        '<button type="button" class="chat-msg-attachment' +
+        (clickable ? " clickable" : "") +
+        '" data-message="' +
+        index +
+        '" data-attachment="' +
+        at +
+        '"' +
+        (clickable ? ' title="Open"' : "") +
+        (clickable ? "" : " disabled") +
+        ">" +
+        '<span class="chat-msg-attachment-name">' +
+        escapeHtml(a.name) +
+        "</span>" +
+        '<span class="chat-msg-attachment-detail">' +
+        escapeHtml(detail) +
+        "</span>" +
+        "</button>"
+      );
+    })
+    .join("");
+  return '<div class="chat-msg-attachments">' + cards + "</div>";
+}
+
+// The attachment viewer. A dialog rather than a panel, because the contents can
+// be long and the point is to read them without the conversation moving.
+function openAttachmentViewer(messageIndex, attachmentIndex) {
+  const attachment = activeChatMessages[messageIndex]?.attachments?.[attachmentIndex];
+  if (!attachment?.text) return;
+  const dialog = el("attachmentViewer");
+  el("attachmentViewerName").textContent = attachment.name;
+  const lines = attachment.text.split("\n").length;
+  el("attachmentViewerMeta").textContent =
+    `${lines.toLocaleString()} line${lines === 1 ? "" : "s"}` +
+    (attachment.full_chars > attachment.text.length
+      ? ` · showing the first ${attachment.text.length.toLocaleString()} of ${attachment.full_chars.toLocaleString()} characters`
+      : "");
+  // Rendered through the same markdown path as a message, so the file arrives
+  // highlighted, gutter and all, and its own Copy button comes for free.
+  el("attachmentViewerBody").innerHTML = markdownToHtml(
+    "```" + (attachment.lang || "") + "\n" + attachment.text + "\n```"
+  );
+  dialog.showModal();
+}
+
 function renderMessages() {
   // Markdown-rendered (tables/bold/code fences/etc, see markdownToHtml —
   // shared with the notes preview) — only reached once per full render, not
@@ -182,18 +353,34 @@ function renderMessages() {
   // re-parsing markdown here never competes with a token actually arriving.
   chatMessagesEl.innerHTML = activeChatMessages
     .map(
-      (m) =>
+      (m, index) =>
         '<div class="chat-msg ' +
         m.role +
         (m.source === "voice" ? " voice" : "") +
-        '"><div class="chat-msg-bubble">' +
+        '">' +
+        recallNoteHtml(index) +
+        '<div class="chat-msg-bubble">' +
         markdownToHtml(m.content) +
         // Spoken turns are marked because they are read differently: a user
         // message is a speech-recognition guess rather than something typed
         // deliberately, so an odd-looking exchange is usually the transcript's
         // fault, not the model's.
         (m.source === "voice" ? '<span class="chat-msg-tag">voice</span>' : "") +
-        "</div></div>"
+        "</div>" +
+        // Attached files as cards above the actions, not as text inside the
+        // bubble. Clicking one opens its contents; the transcript stays about
+        // what was asked.
+        messageAttachmentsHtml(m, index) +
+        // Copies the message's own markdown source, not the rendered HTML —
+        // read from activeChatMessages by index rather than scraped back out of
+        // the DOM, so what lands on the clipboard is exactly what the model
+        // wrote, fences and all.
+        '<div class="chat-msg-actions">' +
+        '<button class="chat-msg-copy" type="button" data-index="' +
+        index +
+        '" title="Copy this message">Copy</button>' +
+        "</div>" +
+        "</div>"
     )
     .join("");
   chatMainEl.classList.toggle("has-active", activeChatMessages.length > 0);
@@ -214,28 +401,101 @@ function chatNearBottom(thresholdPx = 80) {
 
 // Attach button — opens a native file picker (Rust side reads the file
 // directly, see ai/chat.rs's pick_chat_attachment) and stashes the result
-// until the next send. Only images and plain-text-ish files are usable
-// right now; PDF/Excel/other binary formats come back "unsupported" since
-// parsing those would need a real parser this app doesn't have yet.
+// until the next send. Images go as images; text, code, spreadsheets, PDFs,
+// Word and PowerPoint files are turned into text there and inlined.
 async function attachFile() {
   const attachment = await invoke("pick_chat_attachment");
   if (!attachment) return;
   if (attachment.kind === "unsupported") {
-    showToast("Bu dosya türü henüz desteklenmiyor (örn. PDF/Excel) — sadece resim ve düz metin dosyaları eklenebilir");
+    showToast(
+      `.${attachment.mime} dosyaları okunamıyor — resim, metin, kod, Excel, PDF, Word, PowerPoint ve zip eklenebilir`
+    );
     return;
   }
-  pendingAttachment = attachment;
-  renderPendingAttachment();
+  // A format we can read that this file defeated — a scanned PDF, an empty
+  // workbook. The Rust side words the reason; repeating it here is the whole
+  // point of keeping the two cases apart.
+  if (attachment.kind === "failed") {
+    showToast(`${attachment.name}: ${attachment.problem}`);
+    return;
+  }
+  pendingAttachments.push(attachment);
+  renderPendingAttachments();
+  // Truncation has to be visible at attach time, not discovered later in the
+  // transcript: the user may want to raise the limit or attach less.
+  if (attachment.full_chars > attachment.data.length) {
+    showToast(
+      `${attachment.name} çok uzun — ilk ${attachment.data.length.toLocaleString()} karakteri ` +
+        `gönderilecek (toplam ${attachment.full_chars.toLocaleString()}). Sınır: Ayarlar → Advanced → Chat`
+    );
+  }
 }
 
-function renderPendingAttachment() {
-  const chip = el("chatAttachmentChip");
-  if (!pendingAttachment) {
-    chip.style.display = "none";
+// The badge on a card: the extension, which is what people recognise a file by.
+function attachmentBadge(attachment) {
+  const dot = attachment.name.lastIndexOf(".");
+  const ext = dot > 0 ? attachment.name.slice(dot + 1) : attachment.mime;
+  return (ext || "file").toUpperCase().slice(0, 5);
+}
+
+// The line under the name. Lines for text, because that is the unit a person
+// thinks in for a file of code or a document, and it is also the honest measure
+// of how much of the model's context this will take.
+function attachmentDetail(attachment) {
+  if (attachment.kind === "image") return "image";
+  const lines = attachment.data ? attachment.data.split("\n").length : 0;
+  const shown = `${lines.toLocaleString()} line${lines === 1 ? "" : "s"}`;
+  return attachment.full_chars > attachment.data.length ? `${shown} · truncated` : shown;
+}
+
+function renderPendingAttachments() {
+  const box = el("chatAttachments");
+  if (!pendingAttachments.length) {
+    box.style.display = "none";
+    box.innerHTML = "";
     return;
   }
-  chip.style.display = "flex";
-  el("chatAttachmentName").textContent = pendingAttachment.name;
+  box.style.display = "flex";
+  box.innerHTML = pendingAttachments
+    .map((attachment, index) => {
+      const remove =
+        '<button type="button" class="chat-attachment-remove" data-index="' +
+        index +
+        '" title="Remove">' +
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M6 6l12 12M18 6L6 18"/></svg>' +
+        "</button>";
+      // An image shows itself. The data is already base64 in memory, so this
+      // costs no extra read.
+      if (attachment.kind === "image") {
+        return (
+          '<div class="chat-attachment-card image">' +
+          '<img alt="" src="data:' +
+          escapeHtml(attachment.mime) +
+          ";base64," +
+          attachment.data +
+          '" />' +
+          remove +
+          "</div>"
+        );
+      }
+      return (
+        '<div class="chat-attachment-card">' +
+        '<div class="chat-attachment-title" title="' +
+        escapeHtml(attachment.name) +
+        '">' +
+        escapeHtml(attachment.name) +
+        "</div>" +
+        '<div class="chat-attachment-detail">' +
+        escapeHtml(attachmentDetail(attachment)) +
+        "</div>" +
+        '<span class="chat-attachment-badge">' +
+        escapeHtml(attachmentBadge(attachment)) +
+        "</span>" +
+        remove +
+        "</div>"
+      );
+    })
+    .join("");
 }
 
 function autoTitleFromMessages() {
@@ -272,41 +532,121 @@ function autoResizeChatInput() {
   chatInput.style.height = Math.min(chatInput.scrollHeight, 160) + "px";
 }
 
+// One attached file as markdown for the prompt: the filename on its own line,
+// then a fence carrying the LANGUAGE so the block highlights. The filename is
+// deliberately not the fence token — that is what used to produce ```script.py,
+// a language no highlighter knows.
+// How long the memory lookup may hold up a message before it is sent without
+// one. Above the 400ms a warm lookup measures, below the 2.8s a cold one does:
+// the common case always gets its memory, and the cold case sends promptly and
+// gets it on the next message (the embedding model is resident by then).
+const RECALL_DEADLINE_MS = 1500;
+
+// Resolves to null if `promise` has not settled within `ms`. The work is not
+// cancelled — it cannot be, and letting it finish is what warms the model for
+// the next message — its result is simply no longer waited for.
+function withDeadline(promise, ms, label) {
+  let timer;
+  const deadline = new Promise((resolve) => {
+    timer = setTimeout(() => {
+      console.warn(`${label} took longer than ${ms}ms; continuing without it`);
+      resolve(null);
+    }, ms);
+  });
+  return Promise.race([promise.catch(() => null), deadline]).finally(() => clearTimeout(timer));
+}
+
+function inlineAttachment(attachment) {
+  // A pending attachment carries its text in `data` (the ChatAttachment shape
+  // the Rust picker returns); a saved one carries it in `text`
+  // (MessageAttachment). Accepting both keeps one function for the send path and
+  // for rebuilding history, which is the only way the two can't disagree about
+  // what the model was shown.
+  const body = attachment.text ?? attachment.data ?? "";
+  const truncated = attachment.full_chars > body.length;
+  const heading = truncated
+    ? `${attachment.name} — first ${body.length.toLocaleString()} of ` +
+      `${attachment.full_chars.toLocaleString()} characters`
+    : attachment.name;
+  return `${heading}\n\`\`\`${attachment.lang}\n${body}\n\`\`\``;
+}
+
 async function sendChatMessage() {
   const text = chatInput.value.trim();
-  const attachment = pendingAttachment;
-  if ((!text && !attachment) || sendingMessage) return;
+  const attachments = pendingAttachments;
+  if ((!text && !attachments.length) || sendingMessage) return;
   const profile = llmProfiles.find((p) => p.id === activeLlmProfileId) || llmProfiles[0];
   if (!profile) {
     showToast("No LLM configured — add one in Settings");
     return;
   }
 
-  pendingAttachment = null;
-  renderPendingAttachment();
+  pendingAttachments = [];
+  renderPendingAttachments();
 
   // What actually gets sent to the model for THIS turn (may be an
-  // OpenAI-style content-parts array with the image inlined as a data URI,
-  // or the attached text file's contents inlined as a fenced code block) vs.
-  // what gets stored/shown permanently (plain text only — an image's bytes
-  // are never written to the saved chat file, so history doesn't balloon
-  // with base64 forever; a lightweight "📎 filename" marker stands in for
-  // it instead, meaning later turns no longer have the image in context).
-  let wireContent = text;
-  let displayContent = text;
-  if (attachment?.kind === "image") {
-    wireContent = [
-      { type: "text", text: text || "What's in this image?" },
-      { type: "image_url", image_url: { url: `data:${attachment.mime};base64,${attachment.data}` } },
-    ];
-    displayContent = (text ? text + "\n\n" : "") + `📎 ${attachment.name}`;
-  } else if (attachment?.kind === "text") {
-    const inlined = "```" + attachment.name + "\n" + attachment.data + "\n```";
-    wireContent = text ? text + "\n\n" + inlined : inlined;
-    displayContent = wireContent;
-  }
+  // OpenAI-style content-parts array with images inlined as data URIs, plus
+  // any attached text inlined as fenced code blocks) vs. what gets
+  // stored/shown permanently (plain text only — an image's bytes are never
+  // written to the saved chat file, so history doesn't balloon with base64
+  // forever; a lightweight "📎 filename" marker stands in for it instead,
+  // meaning later turns no longer have the image in context).
+  const images = attachments.filter((a) => a.kind === "image");
+  const texts = attachments.filter((a) => a.kind === "text");
+  // The model gets the whole file. The transcript does NOT: it keeps the
+  // attachment beside the message (see ChatMessage.attachments in ai/chat.rs) and
+  // shows a card, because a 150-line file pasted into the bubble buries the
+  // question the user actually asked.
+  const withText = [text, texts.map(inlineAttachment).join("\n\n")].filter(Boolean).join("\n\n");
 
-  activeChatMessages.push({ role: "user", content: displayContent, ts: Date.now() });
+  let wireContent = withText;
+  if (images.length) {
+    wireContent = [
+      // A prompt is required alongside an image: a bare image part with no text
+      // leaves some servers with nothing to answer.
+      { type: "text", text: withText || (images.length === 1 ? "What's in this image?" : "What's in these images?") },
+      ...images.map((a) => ({
+        type: "image_url",
+        image_url: { url: `data:${a.mime};base64,${a.data}` },
+      })),
+    ];
+  }
+  const displayContent = text;
+  // An image's base64 is deliberately not persisted — it would grow the chat
+  // file without bound, and a later turn cannot re-send it anyway.
+  const storedAttachments = attachments.map((a) => ({
+    name: a.name,
+    lang: a.lang,
+    kind: a.kind,
+    text: a.kind === "image" ? "" : a.data,
+    full_chars: a.full_chars,
+  }));
+
+  // Started here, before the message is rendered and written to disk, and
+  // awaited much further down — so the lookup runs alongside that work instead
+  // of after it. The query is this message plus the previous turn, because a
+  // follow-up ("and how do we do that?") has no subject of its own to search on.
+  //
+  // The open conversation is excluded: persistActiveChat below indexes it, so
+  // without this the search would find the question being asked and recall it to
+  // itself.
+  const recallQuery = [activeChatMessages.at(-1)?.content, text].filter(Boolean).join(" ");
+  const recallPromise = withDeadline(
+    invoke("recall_context", {
+      query: recallQuery,
+      baseUrl: profile.base_url,
+      chatId: activeChatId || "",
+    }),
+    RECALL_DEADLINE_MS,
+    "recall"
+  );
+
+  activeChatMessages.push({
+    role: "user",
+    content: displayContent,
+    ts: Date.now(),
+    attachments: storedAttachments,
+  });
   chatInput.value = "";
   autoResizeChatInput();
   renderMessages();
@@ -320,8 +660,40 @@ async function sendChatMessage() {
   streamingChatId = chatId;
   streamingText = "";
 
-  const history = activeChatMessages.slice(0, -1).map((m) => ({ role: m.role, content: m.content }));
+  // Earlier turns are rebuilt WITH their attachments inlined again: the files
+  // live beside those messages rather than in them, so sending only `content`
+  // would quietly drop every file from the conversation after the turn it was
+  // attached to — the model would answer "as we discussed in that file" having
+  // never seen it twice.
+  const history = activeChatMessages.slice(0, -1).map((m) => ({
+    role: m.role,
+    content: [m.content, (m.attachments || []).filter((a) => a.text).map(inlineAttachment).join("\n\n")]
+      .filter(Boolean)
+      .join("\n\n"),
+  }));
   history.push({ role: "user", content: wireContent });
+
+  // Anything decided in an EARLIER conversation that bears on this message —
+  // usually nothing, and nothing is what gets injected then.
+  //
+  // It has to be awaited, because it goes INTO the array that is about to be
+  // sent. That makes it the one thing standing between pressing send and the
+  // request leaving, so it is bounded: measured at 400ms with the embedding
+  // model resident and 2.8s with it cold, and a message that waits three seconds
+  // to start is a worse trade than a message that occasionally goes without its
+  // memory. See RECALL_DEADLINE_MS.
+  //
+  // The endpoint goes with the query: recall takes text out of your own
+  // conversations, and whether that may leave this machine depends on where the
+  // answer is coming from (see recall.share_with_cloud in Settings > Advanced).
+  const recalled = await recallPromise;
+  if (recalled?.block) history.unshift({ role: "system", content: recalled.block });
+  // Attached to the answer this recall was for — activeChatMessages is about to
+  // gain the assistant turn, so its index is the current length.
+  if (recalled?.hits?.length) recalledByIndex.set(activeChatMessages.length, recalled.hits);
+
+  // Unshifted last so the user's own instructions stay the first thing the model
+  // reads — recalled history is context, not a persona.
   const systemPrompt = chatInstructionsInput.value.trim();
   if (systemPrompt) history.unshift({ role: "system", content: systemPrompt });
   activeChatMessages.push({ role: "assistant", content: "", ts: Date.now() });
@@ -403,13 +775,78 @@ listen("voice-turn-recorded", async (event) => {
 });
 
 el("chatAttachBtn").addEventListener("click", attachFile);
-el("chatAttachRemoveBtn").addEventListener("click", () => {
-  pendingAttachment = null;
-  renderPendingAttachment();
+// Delegated, because the cards are rebuilt on every change.
+el("chatAttachments").addEventListener("click", (event) => {
+  const button = event.target.closest(".chat-attachment-remove");
+  if (!button) return;
+  pendingAttachments.splice(Number(button.dataset.index), 1);
+  renderPendingAttachments();
 });
 el("newChatBtn").addEventListener("click", newChat);
 el("chatDeleteBtn").addEventListener("click", () => {
   if (activeChatId) deleteChat(activeChatId);
+});
+
+// Debounced, because every keystroke would otherwise run an FTS query. 180ms is
+// below the point a search feels laggy and above a fast typist's gap between
+// letters, so a word costs one query rather than one per letter.
+let chatSearchTimer = null;
+el("chatSearchInput").addEventListener("input", (event) => {
+  const raw = event.target.value;
+  clearTimeout(chatSearchTimer);
+  chatSearchTimer = setTimeout(() => runChatSearch(raw), 180);
+});
+el("chatSearchInput").addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  event.target.value = "";
+  clearTimeout(chatSearchTimer);
+  runChatSearch("");
+});
+
+// Delegated on the message list because the rows are rebuilt wholesale on every
+// render, so per-row listeners would be lost and leak.
+chatMessagesEl.addEventListener("click", (event) => {
+  const copy = event.target.closest(".chat-msg-copy");
+  if (copy) {
+    const message = activeChatMessages[Number(copy.dataset.index)];
+    // The attachments go along, so a pasted message is the whole turn — the
+    // model saw the files, and someone reading the paste should too.
+    if (message) {
+      bindCopyButton(copy, () =>
+        [message.content, (message.attachments || []).filter((a) => a.text).map(inlineAttachment).join("\n\n")]
+          .filter(Boolean)
+          .join("\n\n")
+      );
+    }
+    return;
+  }
+  const card = event.target.closest(".chat-msg-attachment.clickable");
+  if (card) openAttachmentViewer(Number(card.dataset.message), Number(card.dataset.attachment));
+});
+
+el("attachmentViewerClose").addEventListener("click", () => el("attachmentViewer").close());
+// Clicking the backdrop closes it — <dialog> reports those clicks as landing on
+// the dialog element itself rather than on any of its children.
+el("attachmentViewer").addEventListener("click", (event) => {
+  if (event.target === el("attachmentViewer")) el("attachmentViewer").close();
+});
+
+el("chatCopyAllBtn").addEventListener("click", async (event) => {
+  if (!activeChatMessages.length) return showToast("Kopyalanacak bir şey yok");
+  // Labelled by role and separated by a rule, so a pasted conversation is
+  // still readable as a conversation rather than as one run-on block.
+  const transcript = activeChatMessages
+    .map((m) => `## ${m.role === "user" ? "You" : "Assistant"}\n\n${m.content}`)
+    .join("\n\n---\n\n");
+  const title = chatTitleInput.value.trim();
+  try {
+    await copyText((title ? `# ${title}\n\n` : "") + transcript);
+    showToast(`Konuşma kopyalandı (${activeChatMessages.length} mesaj)`);
+  } catch (err) {
+    console.error("copy failed", err);
+    showToast("Kopyalanamadı — konsola bakın");
+  }
+  event.currentTarget.blur();
 });
 chatTitleInput.addEventListener("blur", () => {
   if (activeChatId) persistActiveChat();

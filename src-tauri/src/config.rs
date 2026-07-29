@@ -59,6 +59,15 @@ pub struct TtsProfile {
 #[derive(Serialize, Deserialize, Clone, Default)]
 pub struct AppConfig {
     pub notes_dir: Option<String>,
+    // Where conversation files live. None means app_data_dir/Chats, which is
+    // where they were before this was settable — so an existing install keeps
+    // reading exactly the folder it already had.
+    //
+    // Configurable for the same reason notes_dir is: this is the user's own
+    // history, and they may want it somewhere they back up or sync. The recall
+    // index deliberately does NOT follow it — see ai/recall.rs's db_path.
+    #[serde(default)]
+    pub chats_dir: Option<String>,
     // Files opened from outside notes_dir (via "Open file" or drag-drop) —
     // tracked here so they keep showing up in the sidebar across restarts
     // instead of only appearing for the session they were opened in.

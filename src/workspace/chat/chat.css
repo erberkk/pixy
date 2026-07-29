@@ -189,7 +189,163 @@
 
 .chat-msg {
   display: flex;
+  /* Column, because the bubble now has an actions row under it. Was a single
+     bubble in a row before. */
+  flex-direction: column;
   max-width: 72%;
+}
+
+/* Per-message actions. Hidden until the message is hovered: one Copy button per
+   turn, always visible, turns a conversation into a column of buttons. */
+.chat-msg-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 3px;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.chat-msg:hover .chat-msg-actions,
+.chat-msg-actions:focus-within {
+  opacity: 1;
+}
+.chat-msg.user .chat-msg-actions {
+  justify-content: flex-end;
+}
+.chat-msg-copy {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 10px;
+  padding: 2px 7px;
+  cursor: pointer;
+}
+.chat-msg-copy:hover {
+  color: var(--text);
+  border-color: var(--border);
+  background: var(--bg-elevated);
+}
+.chat-msg-copy.copied {
+  color: #8fc98f;
+}
+.chat-msg-copy.failed {
+  color: #d98a8a;
+}
+
+/* Files attached to a sent message. Same visual family as the pending cards
+   above the composer, smaller: here they are a record, not something being
+   assembled. */
+.chat-msg-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.chat-msg-attachment {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  max-width: 220px;
+  padding: 6px 10px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-family: inherit;
+  text-align: left;
+  cursor: default;
+}
+.chat-msg-attachment.clickable {
+  cursor: pointer;
+}
+.chat-msg-attachment.clickable:hover {
+  border-color: var(--accent);
+}
+.chat-msg-attachment-name {
+  font-size: 11.5px;
+  color: var(--text);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-msg-attachment-detail {
+  font-size: 9.5px;
+  color: var(--text-dim);
+  font-family: var(--mono);
+}
+
+/* The attachment viewer. Sized in viewport units because the content is a file
+   of unknown length and the dialog should not resize as different files open. */
+.attachment-viewer {
+  width: min(880px, 88vw);
+  max-height: 82vh;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--bg-elevated);
+  color: var(--text);
+  overflow: hidden;
+  /* The default <dialog> margin centres horizontally only. */
+  margin: auto;
+}
+.attachment-viewer::backdrop {
+  background: rgba(0, 0, 0, 0.55);
+}
+.attachment-viewer-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elevated-hover);
+}
+.attachment-viewer-name {
+  font-size: 13px;
+  font-weight: 600;
+  word-break: break-all;
+}
+.attachment-viewer-meta {
+  margin-top: 2px;
+  font-size: 10.5px;
+  color: var(--text-dim);
+  font-family: var(--mono);
+}
+.attachment-viewer-body {
+  padding: 12px 14px 16px;
+  overflow: auto;
+  /* Bounded so the code block inside scrolls rather than the dialog growing
+     past the screen: 82vh total, minus the header. */
+  max-height: calc(82vh - 62px);
+}
+/* The body holds one code block, which brings its own frame — the outer margin
+   it would add at the top is redundant inside a dialog that already has padding. */
+.attachment-viewer-body .code-block {
+  margin-top: 0;
+}
+
+/* Heading over the content-match group in the sidebar's search results. */
+.chat-list-group {
+  padding: 12px 12px 4px;
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+/* The matching line under a content-match row. Two lines at most: this is a
+   reason to click, not the content itself. */
+.chat-item-snippet {
+  margin-top: 2px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-dim);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 .chat-msg.user {
   align-self: flex-end;
@@ -207,6 +363,13 @@
   color: var(--text);
   white-space: pre-wrap;
   word-break: break-word;
+  /* The bubble is a flex item of .chat-msg, so its automatic minimum size is
+     its min-content — and a code block's min-content is the width of its
+     longest line, which is not something `overflow: auto` inside the block
+     reduces. Without this a reply containing one long line of code pushed the
+     bubble past .chat-msg's max-width and off the edge of the window instead of
+     scrolling inside the block. Safe for prose because of word-break above. */
+  min-width: 0;
 }
 .chat-msg.user .chat-msg-bubble {
   background: var(--accent-soft);
@@ -382,52 +545,101 @@
   display: block;
 }
 
-.chat-attachment-chip {
+/* Pending attachments, one card each above the composer. Cards rather than a
+   single line of text because a card can carry the three things that matter at
+   a glance — what the file is called, how big it is, and what type it is — and
+   because an image can simply show itself. */
+.chat-attachments {
   flex-shrink: 0;
   display: flex;
-  align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
-  margin: 0 22px;
-  padding: 6px 10px;
+  margin: 0 22px 2px;
+}
+
+.chat-attachment-card {
+  position: relative;
+  width: 168px;
+  min-height: 62px;
+  padding: 9px 11px 22px;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.chat-attachment-title {
   font-size: 12px;
+  line-height: 1.35;
+  color: var(--text);
+  /* Two lines, then ellipsis: a long generated filename would otherwise make
+     every card as tall as its worst case. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-all;
+}
+
+.chat-attachment-detail {
+  margin-top: 3px;
+  font-size: 10px;
   color: var(--text-dim);
 }
-.chat-attachment-chip svg {
-  width: 13px;
-  height: 13px;
-  flex-shrink: 0;
-  color: var(--accent);
+
+/* Pinned to the bottom-left so the badges line up across cards of differing
+   title lengths. */
+.chat-attachment-badge {
+  position: absolute;
+  left: 11px;
+  bottom: 7px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--bg-elevated-hover);
+  border: 1px solid var(--border);
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
 }
-.chat-attachment-name {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+
+.chat-attachment-card.image {
+  width: 92px;
+  min-height: 92px;
+  height: 92px;
+  padding: 0;
 }
+.chat-attachment-card.image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
 .chat-attachment-remove {
-  flex-shrink: 0;
+  position: absolute;
+  top: 4px;
+  right: 4px;
   width: 18px;
   height: 18px;
   display: flex;
   align-items: center;
   justify-content: center;
   border: none;
-  background: transparent;
-  color: var(--text-faint);
-  cursor: pointer;
   border-radius: 5px;
+  /* Its own backing, because on an image thumbnail there is no telling what
+     colour sits behind it. */
+  background: rgba(0, 0, 0, 0.55);
+  color: #ddd;
+  cursor: pointer;
 }
 .chat-attachment-remove:hover {
-  background: var(--danger-soft);
-  color: var(--danger);
+  background: var(--danger);
+  color: #fff;
 }
 .chat-attachment-remove svg {
-  width: 11px;
-  height: 11px;
+  width: 10px;
+  height: 10px;
   color: inherit;
 }
 
@@ -487,4 +699,25 @@
 .chat-send-btn svg {
   width: 15px;
   height: 15px;
+}
+
+/* What an answer was given with, from earlier conversations (chat.js's
+   recallNoteHtml). Sits above the bubble rather than inside it: it is not part
+   of what the model said, it is why the model knew it. Deliberately quiet — the
+   point is that it can be checked, not that it competes with the answer. */
+.chat-recall-note {
+  font-size: 11px;
+  color: #777;
+  margin: 0 0 4px 2px;
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  cursor: default;
+}
+
+.chat-msg.user .chat-recall-note {
+  /* The user's own turns are right-aligned, and a recall note never belongs to
+     one anyway — kept as a guard so an off-by-one in the index map shows up as
+     a misplaced note rather than a broken layout. */
+  justify-content: flex-end;
 }

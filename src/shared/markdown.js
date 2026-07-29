@@ -19,6 +19,126 @@ export function inlineMd(text) {
   return text;
 }
 
+// --- fenced code blocks -------------------------------------------------------
+//
+// Rendered as a framed block with a language label, a line-number gutter and a
+// copy button, and syntax-coloured by the vendored highlight.js when it is
+// loaded (see vendor/highlight/). Everything degrades: with no highlighter the
+// block still gets its frame and numbers, just in one colour.
+//
+// Highlighting here rather than in a pass over the DOM afterwards, because this
+// is the one place that knows the language. It costs nothing per streamed token:
+// the chat appends plain text while a reply streams and only runs markdown once
+// the reply is finished (see chat.js's chat-stream-chunk listener).
+
+// Some fences carry a filename or a label rather than a language. Taking only
+// the leading word means ```python title=x still highlights, and a fence of
+// ```script.py falls through to "unknown" instead of being handed to the
+// highlighter as a language name.
+function fenceLanguage(token) {
+  const first = (token || "").trim().split(/[\s,:]/)[0].toLowerCase();
+  return /^[a-z0-9#+._-]+$/.test(first) ? first : "";
+}
+
+function highlightCode(code, lang) {
+  const hljs = typeof window !== "undefined" ? window.hljs : null;
+  // getLanguage resolves aliases too ("py", "sh", "toml"), so this accepts more
+  // than listLanguages() would suggest. Unknown languages are NOT passed to
+  // hljs.highlight: it throws on those rather than falling back.
+  if (!hljs || !lang || !hljs.getLanguage(lang)) return escapeHtml(code);
+  try {
+    // ignoreIllegals, because a model's answer often contains a fragment rather
+    // than a complete valid file, and a grammar hitting something illegal must
+    // not lose the whole block.
+    return hljs.highlight(code, { language: lang, ignoreIllegals: true }).value;
+  } catch {
+    return escapeHtml(code);
+  }
+}
+
+function codeBlockHtml(code, langToken) {
+  const lang = fenceLanguage(langToken);
+  const lineCount = code.split("\n").length;
+  const gutter = Array.from({ length: lineCount }, (_, i) => i + 1).join("\n");
+  const label = escapeHtml(lang || (langToken || "").trim() || "text");
+  return (
+    '<div class="code-block' +
+    (lineCount === 1 ? " one-line" : "") +
+    '">' +
+    '<div class="code-block-bar">' +
+    '<span class="code-block-lang">' +
+    label +
+    "</span>" +
+    // type=button so a block inside a form never submits it.
+    '<button class="code-copy" type="button" title="Copy this block">Copy</button>' +
+    "</div>" +
+    '<div class="code-block-body">' +
+    '<pre class="code-block-gutter" aria-hidden="true">' +
+    gutter +
+    "</pre>" +
+    '<pre><code class="hljs">' +
+    highlightCode(code, lang) +
+    "</code></pre>" +
+    "</div></div>"
+  );
+}
+
+/// Puts text on the system clipboard, and resolves only if it got there.
+///
+/// Goes through Rust rather than navigator.clipboard. The web API rejects with
+/// NotAllowedError ("Document is not focused") whenever this window does not
+/// hold OS focus, and in that state it writes nothing at all — measured against
+/// the real Windows clipboard, which kept its previous contents while the button
+/// reported success. The Rust side has no such condition.
+export async function copyText(text) {
+  await window.__TAURI__.core.invoke("plugin:clipboard-manager|write_text", { label: null, text });
+}
+
+/// Wires a button to copy `getText()`, with the button reporting what happened.
+///
+/// Shared so the code-block button and the whole-message button cannot drift
+/// into reporting success differently — the failure that started this was a
+/// button that said "Copied" when nothing had been copied.
+export function bindCopyButton(button, getText, restingLabel = "Copy") {
+  copyText(getText()).then(
+    () => {
+      button.textContent = "Copied";
+      button.classList.add("copied");
+      setTimeout(() => {
+        button.textContent = restingLabel;
+        button.classList.remove("copied");
+      }, 1200);
+    },
+    (err) => {
+      // Says so rather than lying. The message is short because it sits in a
+      // small button; the detail goes to the console for a bug report.
+      console.error("copy failed", err);
+      button.textContent = "Failed";
+      button.classList.add("failed");
+      setTimeout(() => {
+        button.textContent = restingLabel;
+        button.classList.remove("failed");
+      }, 1600);
+    }
+  );
+}
+
+// One delegated listener for every code block in the document, registered once
+// on import — the blocks themselves are built as HTML strings and replaced
+// wholesale on each render, so per-block listeners would leak with every
+// re-render and be lost on the next one.
+if (typeof document !== "undefined") {
+  document.addEventListener("click", (event) => {
+    const button = event.target.closest?.(".code-copy");
+    if (!button) return;
+    const code = button.closest(".code-block")?.querySelector(".code-block-body > pre > code");
+    if (!code) return;
+    // textContent, not innerHTML: it gives back exactly the original source,
+    // because the highlighter only wraps text in spans and adds none of its own.
+    bindCopyButton(button, () => code.textContent);
+  });
+}
+
 const TABLE_SEPARATOR_RE = /^\s*\|?(\s*:?-{1,}:?\s*\|)+\s*:?-{1,}:?\s*\|?\s*$/;
 
 function splitTableRow(line) {
@@ -67,12 +187,7 @@ export function markdownToHtml(src) {
         i++;
       }
       i++; // skip the closing fence (or the end of input if unterminated)
-      html +=
-        "<pre><code" +
-        (lang ? ' class="lang-' + escapeHtml(lang) + '"' : "") +
-        ">" +
-        escapeHtml(codeLines.join("\n")) +
-        "</code></pre>";
+      html += codeBlockHtml(codeLines.join("\n"), lang);
       continue;
     }
 

@@ -45,6 +45,18 @@ pub enum Kind {
     Names {
         default: &'static str,
     },
+    /// On or off. Rendered as a switch rather than a 0/1 box — a setting whose
+    /// only two values are yes and no should not ask the user to type a number.
+    Toggle {
+        default: bool,
+    },
+    /// Free text, stored exactly as typed. Distinct from `Names`, which folds
+    /// and reorders what it is given: a URL or a model name has to survive
+    /// unchanged.
+    Text {
+        default: &'static str,
+        placeholder: &'static str,
+    },
 }
 
 pub struct Tunable {
@@ -286,6 +298,93 @@ tunables! {
         "Comma-separated, same matching as above — these put the widget in its \
          streaming mood instead.";
 
+    // --- Chat ----------------------------------------------------------------
+    CHAT_ATTACHMENT_MAX_CHARS = "chat.attachment_max_chars", "Chat",
+        "Largest attached file sent", "characters",
+        Kind::Int { min: 1000, max: 500_000, default: 60_000 },
+        restart: false,
+        "An attached file's text goes straight into your question, so a long one \
+         eats the model's whole context before it reads what you asked. Anything \
+         past this is cut off and the chat says so. Roughly four characters to a \
+         token: the default is about 15,000 tokens, which a 32k-context model can \
+         still answer around.";
+
+    // --- Memory --------------------------------------------------------------
+    RECALL_ENABLED = "recall.enabled", "Memory",
+        "Remember earlier conversations", "",
+        Kind::Toggle { default: true },
+        restart: false,
+        "When you ask about something discussed before, the relevant part of that \
+         earlier conversation is quietly added to the question — typed or spoken, \
+         either one can reach the other. Turn this off and every conversation \
+         starts from nothing.";
+
+    RECALL_INDEX_NOTES = "recall.index_notes", "Memory",
+        "Also search Claude Code's own notes", "",
+        Kind::Toggle { default: true },
+        restart: false,
+        "Claude Code keeps short notes of its own about your projects — the ones \
+         the Memory graph in the workspace shows. With this on they are searched \
+         alongside your conversations, which is usually worth it: a note was kept \
+         on purpose, so it says more per line than a chat message. They cover \
+         every project, not just the one you are asking about, so turn this off \
+         if another project's notes start turning up.";
+
+    RECALL_MAX_TURNS = "recall.max_turns", "Memory",
+        "Earlier turns to bring back", "at most",
+        Kind::Int { min: 1, max: 10, default: 3 },
+        restart: false,
+        "How many earlier exchanges may be added at once. This sits in front of \
+         your actual question, so more is not better — a few too many and the \
+         model is answering the old conversation instead of the new one.";
+
+    RECALL_MAX_CHARS = "recall.max_chars", "Memory",
+        "Total size of what is brought back", "characters",
+        Kind::Int { min: 100, max: 4000, default: 600 },
+        restart: false,
+        "A ceiling on the whole recalled block, whatever the count above allows. \
+         Matters most for spoken replies, where the entire budget is a couple of \
+         hundred tokens.";
+
+    RECALL_MIN_COVERAGE = "recall.min_coverage", "Memory",
+        "How closely it has to match", "",
+        Kind::Float { min: 0.1, max: 1.0, step: 0.05, default: 0.5 },
+        restart: false,
+        "The share of your question's meaningful words an old conversation has to \
+         contain before it counts as related. Raise it if it keeps dragging in \
+         things you did not mean; lower it if it forgets things you know you \
+         discussed. At 1.0 every word has to match.";
+
+    RECALL_EMBEDDING_URL = "recall.embedding_url", "Memory",
+        "Embedding server", "",
+        Kind::Text { default: "", placeholder: "http://localhost:11434/v1" },
+        restart: false,
+        "Optional, and empty by default. Without it, an old conversation is found \
+         by the words it used — ask about \"caching\" and it finds the one that \
+         said \"cache\". Point this at any OpenAI-compatible /v1/embeddings \
+         endpoint (Ollama serves one) and it can also find one that made the same \
+         point in different words. Only local addresses are used: this sends your \
+         conversations to whatever is at this URL.";
+
+    RECALL_EMBEDDING_MODEL = "recall.embedding_model", "Memory",
+        "Embedding model", "",
+        Kind::Text { default: "", placeholder: "bge-m3" },
+        restart: false,
+        "The model name to ask that server for. Both this and the URL above have \
+         to be filled in before anything changes. Pick a multilingual one if you \
+         work in more than one language — an English-only model will not connect \
+         a Turkish conversation to an English question.";
+
+    RECALL_SHARE_WITH_CLOUD = "recall.share_with_cloud", "Memory",
+        "Send remembered history to non-local models", "",
+        Kind::Toggle { default: false },
+        restart: false,
+        "Off by default, and deliberately. Recall pulls text out of your past \
+         conversations and puts it in the next request — which is harmless while \
+         the model runs on this machine, and is sending your history to someone \
+         else's server the moment you point a profile at a hosted API. Local \
+         models are unaffected either way.";
+
     // --- GitHub --------------------------------------------------------------
     GITHUB_DIGEST_HOUR = "github.digest_hour", "GitHub",
         "Daily digest after", "o'clock",
@@ -372,11 +471,43 @@ pub fn secs(app: &tauri::AppHandle, id: &str) -> std::time::Duration {
     std::time::Duration::from_secs(int(app, id).max(0) as u64)
 }
 
-// There are deliberately no `float`/`names` readers here yet: every tunable of
-// those two kinds is currently read by the frontend, which takes its values from
-// the get_tunables payload. Both kinds are fully described and validated below,
-// so adding a reader is a few lines the day Rust first needs one — but an unused
-// one today is just dead code.
+pub fn float(app: &tauri::AppHandle, id: &str) -> f64 {
+    let default = match spec(id).kind {
+        Kind::Float { default, .. } => default,
+        _ => 0.0,
+    };
+    override_value(app, id)
+        .and_then(|v| v.as_f64())
+        .unwrap_or(default)
+}
+
+pub fn toggle(app: &tauri::AppHandle, id: &str) -> bool {
+    let default = match spec(id).kind {
+        Kind::Toggle { default } => default,
+        _ => false,
+    };
+    override_value(app, id)
+        .and_then(|v| v.as_bool())
+        .unwrap_or(default)
+}
+
+pub fn text(app: &tauri::AppHandle, id: &str) -> String {
+    let default = match spec(id).kind {
+        Kind::Text { default, .. } => default,
+        _ => "",
+    };
+    override_value(app, id)
+        .and_then(|v| v.as_str().map(str::to_string))
+        .unwrap_or_else(|| default.to_string())
+        .trim()
+        .to_string()
+}
+
+// There is deliberately no `names` reader here yet: both tunables of that kind
+// are read by the frontend, which takes its values from the get_tunables
+// payload. The kind is fully described and validated below, so adding a reader
+// is a few lines the day Rust first needs one — but an unused one today is just
+// dead code.
 
 /// Splits a `Names` value into lowercase substrings, dropping empties so a stray
 /// trailing comma can't produce a pattern that matches everything.
@@ -401,6 +532,9 @@ pub struct TunableInfo {
     max: Option<f64>,
     step: Option<f64>,
     default: Value,
+    /// Example text for an optional setting whose default is empty, where the
+    /// default itself would show the user nothing.
+    placeholder: &'static str,
     restart: bool,
 }
 
@@ -423,6 +557,8 @@ fn default_value(kind: &Kind) -> Value {
         Kind::Int { default, .. } => Value::from(default),
         Kind::Float { default, .. } => Value::from(default),
         Kind::Names { default } => Value::from(default),
+        Kind::Toggle { default } => Value::from(default),
+        Kind::Text { default, .. } => Value::from(default),
     }
 }
 
@@ -446,6 +582,8 @@ pub fn get_tunables(app: tauri::AppHandle) -> TunablesPayload {
                     min, max, step, ..
                 } => ("float", Some(min), Some(max), Some(step)),
                 Kind::Names { .. } => ("names", None, None, None),
+                Kind::Toggle { .. } => ("toggle", None, None, None),
+                Kind::Text { .. } => ("text", None, None, None),
             };
             TunableInfo {
                 id: t.id,
@@ -458,6 +596,10 @@ pub fn get_tunables(app: tauri::AppHandle) -> TunablesPayload {
                 max,
                 step,
                 default: default_value(&t.kind),
+                placeholder: match t.kind {
+                    Kind::Text { placeholder, .. } => placeholder,
+                    _ => "",
+                },
                 restart: t.restart,
             }
         })
@@ -526,6 +668,14 @@ fn validate(tunable: &Tunable, value: &Value) -> Result<Value, String> {
             // actually uses can't diverge.
             Ok(Value::from(split_names(text).join(",")))
         }
+        Kind::Toggle { .. } => value
+            .as_bool()
+            .map(Value::from)
+            .ok_or_else(|| format!("{} is on or off.", tunable.label)),
+        Kind::Text { .. } => value
+            .as_str()
+            .map(|s| Value::from(s.trim()))
+            .ok_or_else(|| format!("{} needs text.", tunable.label)),
     }
 }
 
@@ -617,6 +767,10 @@ mod tests {
                         tunable.id
                     );
                 }
+                Kind::Toggle { .. } => {}
+                // A Text default may legitimately be empty — that is how an
+                // optional connection setting says "not configured".
+                Kind::Text { .. } => {}
             }
         }
     }
@@ -678,6 +832,27 @@ mod tests {
             Value::from("teams,zoom,jitsi")
         );
         assert!(validate(apps, &Value::from(3)).is_err());
+    }
+
+    #[test]
+    fn a_toggle_takes_only_a_boolean() {
+        let toggle = spec(RECALL_ENABLED);
+        assert_eq!(validate(toggle, &Value::from(false)).unwrap(), Value::from(false));
+        // A checkbox that sent 0/1 or "true" would otherwise be stored as a
+        // value the reader can't interpret, silently falling back to the default.
+        assert!(validate(toggle, &Value::from(1)).is_err());
+        assert!(validate(toggle, &Value::from("true")).is_err());
+    }
+
+    // The one default in the registry that is a privacy decision rather than a
+    // preference: recall lifts text out of the user's own past conversations, so
+    // sending it to somebody else's server has to be something they turned on.
+    #[test]
+    fn sharing_recalled_history_with_hosted_models_is_off_by_default() {
+        match spec(RECALL_SHARE_WITH_CLOUD).kind {
+            Kind::Toggle { default } => assert!(!default),
+            _ => panic!("expected a toggle"),
+        }
     }
 
     #[test]

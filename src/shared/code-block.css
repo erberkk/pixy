@@ -1,0 +1,145 @@
+/* The frame around a highlighted code block: a bar naming the language, a line
+   number gutter, and a copy button.
+
+   Shared by every view that renders markdown (chat, notes preview, memory
+   bodies) because markdownToHtml emits this markup for all of them — see
+   shared/markdown.js. Must be linked AFTER the per-view stylesheets: those
+   already style bare `pre`/`code` at the same specificity as the rules here,
+   so load order is what decides, and the frame has to win over the plain block
+   it replaces. */
+
+.code-block {
+  margin: 0.6em 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  overflow: hidden;
+  /* Never wider than whatever it sits in. A long line inside must scroll the
+     block, not widen its container past the edge of the window.
+     NOTE for any new view that renders markdown: this is only half the job. A
+     code block's min-content width is its longest line — `overflow: auto` on
+     the scrolling part does not reduce that — so if the element containing the
+     block is itself a flex item, it needs `min-width: 0` or it will be forced
+     wide enough to hold the line. See .chat-msg-bubble and .preview. */
+  max-width: 100%;
+}
+
+.code-block-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 6px 4px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elevated-hover);
+}
+
+.code-block-lang {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.code-copy {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 10px;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+
+.code-copy:hover {
+  color: var(--text);
+  border-color: var(--border);
+  background: var(--bg-elevated);
+}
+
+.code-copy.copied {
+  color: #8fc98f;
+}
+
+.code-copy.failed {
+  color: #d98a8a;
+}
+
+.code-block-body {
+  display: flex;
+  align-items: stretch;
+  /* The scroll lives here, across gutter and code together, so a long line
+     scrolling sideways does not slide out from under its own line number. */
+  overflow-x: auto;
+}
+
+/* The gutter and the code must agree on font, size and line-height exactly —
+   the numbers are aligned by sharing a text baseline, not by any measurement,
+   so any difference makes them drift further apart the longer the block. */
+.code-block-body > pre,
+.code-block-gutter {
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.55;
+  margin: 0;
+  padding: 8px 0;
+  /* Never wrap: a wrapped line takes two rows of height and one number, which
+     desynchronises the gutter from that point down. Horizontal scrolling is
+     what an editor does here anyway. */
+  white-space: pre;
+}
+
+.code-block-gutter {
+  flex: 0 0 auto;
+  padding-right: 10px;
+  padding-left: 10px;
+  text-align: right;
+  color: #4a4a50;
+  background: var(--bg-elevated-hover);
+  border-right: 1px solid var(--border);
+  user-select: none;
+  -webkit-user-select: none;
+  /* Sticks to the left edge while the code scrolls sideways, so the numbers
+     stay readable in a wide block. */
+  position: sticky;
+  left: 0;
+}
+
+/* Overrides the plain-`pre` styling each view defines, which would otherwise
+   draw a second border and background inside this frame.
+
+   Excludes the gutter explicitly: it is also a `pre` child of this element, so
+   without the :not() it inherits `flex: 1 1 auto` here and grows to share the
+   width with the code — which renders as a column of line numbers floating in
+   the middle of an empty band. */
+.code-block-body > pre:not(.code-block-gutter) {
+  flex: 1 1 auto;
+  /* Without this the block cannot be narrower than its longest line: a flex
+     item defaults to min-width:auto, which for `white-space: pre` content is
+     the full unwrapped width, so the block pushed the message bubble off the
+     right edge of the window instead of scrolling inside itself. */
+  min-width: 0;
+  padding-left: 12px;
+  padding-right: 12px;
+  background: none;
+  border: none;
+  border-radius: 0;
+  overflow: visible;
+}
+
+.code-block-body > pre > code {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: inherit;
+  line-height: inherit;
+  color: inherit;
+}
+
+/* A single-line block does not need a gutter column at all — the number "1"
+   next to one line is furniture, not information. */
+.code-block.one-line .code-block-gutter {
+  display: none;
+}

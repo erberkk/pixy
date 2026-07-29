@@ -194,6 +194,9 @@
 
 .preview {
   flex: 1;
+  /* Same reason as .chat-msg-bubble: a fenced code block's min-content is its
+     longest line, and as a flex item this would otherwise be forced that wide. */
+  min-width: 0;
   display: none;
   padding: 20px 34px 40px;
   overflow-y: auto;

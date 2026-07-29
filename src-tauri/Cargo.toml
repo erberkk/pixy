@@ -30,6 +30,35 @@ uuid = { version = "1", features = ["v4"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "blocking", "multipart", "rustls-tls"] }
 chrono = "0.4"
 base64 = "0.22"
+# "bundled" compiles SQLite from source into the binary rather than linking
+# whatever the machine happens to have — the point of this whole design is that
+# a user installs nothing extra, and it also guarantees FTS5 is compiled in
+# (it is not universally enabled in system SQLite builds).
+rusqlite = { version = "0.32", features = ["bundled"] }
+# Attachment text extraction — see content/documents.rs.
+#
+# calamine reads xlsx/xls (shared strings, several sheets, number formats: not
+# worth hand-rolling). pdf-extract handles PDF, where the work is font encodings
+# and text positioning rather than the container.
+#
+# docx and pptx are NOT crates: both are a zip of XML, and the text is one
+# element type in one file, so they are read directly with the zip + quick-xml
+# below. The alternatives were docx-rust (little used, weak on tables) and undoc
+# (young, and pulls tokio into a deliberately blocking codebase) — more
+# dependency and more risk than the ~80 lines they would replace.
+#
+# csv/tsv need nothing at all: a CSV is already text, and the text path reads it.
+calamine = "0.36"
+pdf-extract = "0.12"
+# Pinned to the versions calamine already builds, so making them direct
+# dependencies costs no extra compilation.
+#
+# zip's default features add zstd (a C binding via zstd-sys) and AES decryption,
+# neither of which an Office file needs — "deflate" is what these containers
+# actually use, and it is what calamine asks for too.
+zip = { version = "8.6", default-features = false, features = ["deflate"] }
+quick-xml = "0.41"
+tauri-plugin-clipboard-manager = "2.3.2"
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.61", features = [

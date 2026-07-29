@@ -19,13 +19,14 @@ use agent::server::{
     start_event_server,
 };
 use ai::chat::{
-    delete_chat, get_chat_instructions, list_chats, load_chat, pick_chat_attachment, record_voice_turn, save_chat,
-    save_chat_instructions,
+    choose_chats_dir, delete_chat, get_chat_instructions, get_chats_dir, list_chats, load_chat,
+    pick_chat_attachment, record_voice_turn, reset_chats_dir, save_chat, save_chat_instructions,
 };
 use ai::llm::{
     get_llm_settings, save_llm_settings, send_chat_message, set_active_llm_profile, start_server_now,
     test_llm_connection,
 };
+use ai::recall::{recall_context, recall_reindex, recall_status, search_chats};
 use ai::speech::{get_stt_settings, get_tts_settings, save_stt_settings, save_tts_settings};
 use ai::voice::{
     get_voice_readiness, set_voice_enabled, set_voice_threshold, voice_reply_stream, voice_speak, voice_transcribe,
@@ -50,6 +51,35 @@ use ui::windows::{
     position_top_center,
 };
 
+/// Runs blocking work off the main thread, from an `async` command.
+///
+/// Two separate hazards make this necessary, and the middle ground between them
+/// is narrow:
+///
+/// 1. A SYNC `#[tauri::command]` runs on the MAIN thread. Anything slow in one
+///    stops the window pumping Win32 messages and Windows puts "Not Responding"
+///    in the title bar. Measured: a command waiting on an HTTP request had
+///    IsHungAppWindow() return true within two seconds.
+/// 2. An `async` command runs on the Tokio runtime — but `reqwest::blocking`
+///    builds its own runtime internally and cannot do that from inside another
+///    one. Measured: after making the commands async, every HTTP command hung
+///    forever while the SQLite ones still answered in milliseconds.
+///
+/// spawn_blocking is the answer to both: it is off the main thread, and it is a
+/// context where blocking is allowed.
+pub(crate) async fn offload<T, F>(work: F) -> T
+where
+    F: FnOnce() -> T + Send + 'static,
+    T: Send + 'static,
+{
+    // A panic in the closure is a bug in the command, and there is no channel to
+    // report it through for the commands that do not return Result — so it is
+    // re-raised rather than swallowed into a wrong-looking success.
+    tauri::async_runtime::spawn_blocking(work)
+        .await
+        .expect("a command's blocking body panicked")
+}
+
 // Hides (not destroys) a window on close — destroying it would require
 // rebuilding it dynamically later, which hangs (see ui/windows.rs). Shared by
 // every secondary window (workspace, settings, ...).
@@ -68,6 +98,12 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        // Copying goes through here rather than through the webview's
+        // navigator.clipboard, which rejects with NotAllowedError ("Document is
+        // not focused") whenever the window does not hold OS focus — so a copy
+        // button reported success and wrote nothing. Measured, not guessed:
+        // writeText leaves the Windows clipboard untouched in that state.
+        .plugin(tauri_plugin_clipboard_manager::init())
         .invoke_handler(tauri::generate_handler![
             list_notes,
             save_note,
@@ -138,7 +174,14 @@ pub fn run() {
             remove_memory_root,
             get_tunables,
             save_tunables,
-            get_event_server_status
+            get_event_server_status,
+            recall_context,
+            recall_reindex,
+            recall_status,
+            search_chats,
+            get_chats_dir,
+            choose_chats_dir,
+            reset_chats_dir
         ])
         .setup(|app| {
             let window = app
@@ -167,6 +210,12 @@ pub fn run() {
             ui::tray::setup_tray(app)?;
 
             start_event_server(app.handle().clone());
+
+            // The search index is a cache over the chat files, and those can
+            // change while the app isn't running — edited, deleted, synced from
+            // another machine — so it is reconciled at every startup rather than
+            // trusted. Runs on its own thread: it reads every conversation.
+            ai::recall::start_indexer(app.handle().clone());
 
             // Runs on its own thread — it may block briefly on a reachability
             // check/process spawn, and that must never delay window startup.

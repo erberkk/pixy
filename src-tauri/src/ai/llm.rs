@@ -150,17 +150,20 @@ pub fn stop_autostarted() {
 // responsibility to stop; only the at-launch autostart path is cleaned up
 // by "Quit (also stop LLM server)").
 #[tauri::command]
-pub fn start_server_now(base_url: String, start_command: String) -> Result<String, String> {
-    if start_command.trim().is_empty() {
-        return Err("No start command configured.".to_string());
-    }
-    if is_reachable(&base_url) {
-        return Ok("Already running.".to_string());
-    }
-    match spawn_detached(&start_command) {
-        Some(_) => Ok("Starting… give it a few seconds, then test the connection.".to_string()),
-        None => Err("Couldn't launch that command — check it's a valid path.".to_string()),
-    }
+pub async fn start_server_now(base_url: String, start_command: String) -> Result<String, String> {
+    crate::offload(move || {
+        if start_command.trim().is_empty() {
+            return Err("No start command configured.".to_string());
+        }
+        if is_reachable(&base_url) {
+            return Ok("Already running.".to_string());
+        }
+        match spawn_detached(&start_command) {
+            Some(_) => Ok("Starting… give it a few seconds, then test the connection.".to_string()),
+            None => Err("Couldn't launch that command — check it's a valid path.".to_string()),
+        }
+})
+    .await
 }
 
 // --- what a given server+model turned out not to accept ---------------------
@@ -369,18 +372,21 @@ fn chat_completion(
 }
 
 #[tauri::command]
-pub fn test_llm_connection(
+pub async fn test_llm_connection(
     base_url: String,
     model: String,
     api_key: String,
     think: bool,
     max_tokens: u32,
 ) -> Result<String, String> {
-    let reply = run_chat(&base_url, &model, &api_key, None, "Reply with just the word OK.", 30, think, max_tokens)?;
-    if reply.is_empty() {
-        return Ok("(empty reply, but the connection and model are working)".to_string());
-    }
-    Ok(truncate(&reply, 200))
+    crate::offload(move || {
+        let reply = run_chat(&base_url, &model, &api_key, None, "Reply with just the word OK.", 30, think, max_tokens)?;
+        if reply.is_empty() {
+            return Ok("(empty reply, but the connection and model are working)".to_string());
+        }
+        Ok(truncate(&reply, 200))
+})
+    .await
 }
 
 // Judges ONE issue's full thread in isolation — a far more tractable task
@@ -555,7 +561,7 @@ fn turn_has_image(turn: &ChatTurn) -> bool {
 // chat-stream-chunk, then exactly one terminal event: chat-stream-done with
 // the final (artifact-stripped) text, or chat-stream-error.
 #[tauri::command]
-pub fn send_chat_message(
+pub async fn send_chat_message(
     window: tauri::Window,
     chat_id: String,
     base_url: String,
@@ -565,20 +571,23 @@ pub fn send_chat_message(
     max_tokens: u32,
     messages: Vec<ChatTurn>,
 ) {
-    let result = run_chat_stream(&base_url, &model, &api_key, &messages, think, max_tokens, &mut |delta| {
-        let _ = window.emit("chat-stream-chunk", json!({ "chat_id": &chat_id, "delta": delta }));
-    });
-    match result {
-        Ok(full_text) => {
-            let _ = window.emit(
-                "chat-stream-done",
-                json!({ "chat_id": chat_id, "full_text": strip_model_artifacts(&full_text) }),
-            );
+    crate::offload(move || {
+        let result = run_chat_stream(&base_url, &model, &api_key, &messages, think, max_tokens, &mut |delta| {
+            let _ = window.emit("chat-stream-chunk", json!({ "chat_id": &chat_id, "delta": delta }));
+        });
+        match result {
+            Ok(full_text) => {
+                let _ = window.emit(
+                    "chat-stream-done",
+                    json!({ "chat_id": chat_id, "full_text": strip_model_artifacts(&full_text) }),
+                );
+            }
+            Err(error) => {
+                let _ = window.emit("chat-stream-error", json!({ "chat_id": chat_id, "error": error }));
+            }
         }
-        Err(error) => {
-            let _ = window.emit("chat-stream-error", json!({ "chat_id": chat_id, "error": error }));
-        }
-    }
+})
+    .await
 }
 
 // Mirrors run_chat's Ollama-native-first, OpenAI-compatible-fallback

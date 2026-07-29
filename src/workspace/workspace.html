@@ -8,8 +8,18 @@
     <link rel="stylesheet" href="notes/notes.css" />
     <link rel="stylesheet" href="memory/memory.css" />
     <link rel="stylesheet" href="chat/chat.css" />
+    <!-- Last, and deliberately: the code-block frame has to override the bare
+         `pre`/`code` rules the three views above define at equal specificity,
+         so it wins on load order. -->
+    <link rel="stylesheet" href="../vendor/highlight/highlight.css" />
+    <link rel="stylesheet" href="../shared/code-block.css" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Workspace</title>
+    <!-- A classic script, not a module: highlight.js ships as UMD and sets
+         window.hljs, which is what shared/markdown.js looks for. Deferred
+         scripts run in document order, so this is registered before any view
+         renders. -->
+    <script src="../vendor/highlight/highlight.bundle.js" defer></script>
     <script type="module" src="./workspace.js" defer></script>
   </head>
 
@@ -70,6 +80,14 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 5v14M5 12h14"/></svg>
             New chat
           </button>
+          <!-- Same classes as the notes search above, so the two sidebars look
+               and behave alike. Matches on titles instantly, and on what was
+               actually said via the search index (see recall.rs's search_chats)
+               — a conversation titled "hi" is otherwise unfindable. -->
+          <div class="search-wrap">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+            <input class="search-input" id="chatSearchInput" placeholder="Search conversations…" />
+          </div>
         </div>
 
         <div class="search-wrap" id="searchWrap">
@@ -274,6 +292,9 @@
             <button class="icon-btn" id="chatInstructionsBtn" title="Custom instructions (applies to every chat)">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l1.9 4.5L18 9l-4.1 1.5L12 15l-1.9-4.5L6 9l4.1-1.5L12 3z"/><path d="M19 15l.8 1.9L22 18l-2.2.9L19 21l-.8-2.1L16 18l2.2-1.1L19 15z"/></svg>
             </button>
+            <button class="icon-btn" id="chatCopyAllBtn" title="Copy the whole conversation">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 012-2h8"/></svg>
+            </button>
             <button class="icon-btn" id="chatDeleteBtn" title="Delete this chat">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6h14z"/><path d="M10 11v6M14 11v6"/></svg>
             </button>
@@ -301,13 +322,26 @@
           </div>
         </div>
 
-        <div class="chat-attachment-chip" id="chatAttachmentChip" style="display:none;">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>
-          <span class="chat-attachment-name" id="chatAttachmentName"></span>
-          <button type="button" class="chat-attachment-remove" id="chatAttachRemoveBtn" title="Remove attachment">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6L6 18"/></svg>
-          </button>
-        </div>
+        <!-- One card per pending attachment, filled in by chat.js's
+             renderPendingAttachments(): a thumbnail for an image, otherwise the
+             filename, a size line and a type badge. -->
+        <div class="chat-attachments" id="chatAttachments" style="display:none;"></div>
+
+        <!-- Reads an attached file without it having been pasted into the
+             conversation. A native <dialog>, so Escape and the backdrop work
+             without any of it being written here. -->
+        <dialog class="attachment-viewer" id="attachmentViewer">
+          <div class="attachment-viewer-head">
+            <div>
+              <div class="attachment-viewer-name" id="attachmentViewerName"></div>
+              <div class="attachment-viewer-meta" id="attachmentViewerMeta"></div>
+            </div>
+            <button type="button" class="icon-btn" id="attachmentViewerClose" title="Close">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6L6 18"/></svg>
+            </button>
+          </div>
+          <div class="attachment-viewer-body" id="attachmentViewerBody"></div>
+        </dialog>
 
         <form class="chat-composer" id="chatComposer">
           <div class="chat-mascot chat-mascot-small" id="chatMascotRootSmall">

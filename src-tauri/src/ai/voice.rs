@@ -222,43 +222,46 @@ static STT_ENDPOINT: Mutex<Option<String>> = Mutex::new(None);
 /// Transcribes recorded speech. `audio_base64` is a 16kHz mono WAV built by the
 /// mascot's voice/recorder.js.
 #[tauri::command]
-pub fn voice_transcribe(app: tauri::AppHandle, audio_base64: String) -> Result<String, String> {
-    let profile = active_stt(&app).ok_or("No speech-to-text server is configured (Settings -> STT).")?;
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(audio_base64.as_bytes())
-        .map_err(|e| format!("Couldn't decode the recording: {e}"))?;
+pub async fn voice_transcribe(app: tauri::AppHandle, audio_base64: String) -> Result<String, String> {
+    crate::offload(move || {
+        let profile = active_stt(&app).ok_or("No speech-to-text server is configured (Settings -> STT).")?;
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(audio_base64.as_bytes())
+            .map_err(|e| format!("Couldn't decode the recording: {e}"))?;
 
-    // Try the endpoint that worked last time first, then the rest. On the very
-    // first call that's just the full candidate list in preference order.
-    let remembered = STT_ENDPOINT.lock().unwrap().clone();
-    let mut candidates = transcribe_endpoints(&profile.base_url);
-    if let Some(url) = remembered {
-        candidates.retain(|c| c != &url);
-        candidates.insert(0, url);
-    }
-
-    let timeout = crate::tunables::secs(&app, crate::tunables::SPEECH_STT_TIMEOUT);
-    let mut last_error = None;
-    for url in candidates {
-        match post_transcription(&url, &profile, bytes.clone(), timeout) {
-            Ok(text) => {
-                *STT_ENDPOINT.lock().unwrap() = Some(url);
-                return Ok(clean_transcript(&text));
-            }
-            // Only a missing route is worth trying the next candidate for. A 500,
-            // a timeout or a bad model name means we found the right endpoint and
-            // it failed for a reason the user needs to see, not a reason to go
-            // knocking on another URL.
-            Err(TranscribeError::NotFound) => {
-                last_error = Some(format!(
-                    "No transcription endpoint found on {}. Tried the OpenAI-compatible path and whisper.cpp's /inference.",
-                    profile.base_url.trim_end_matches('/')
-                ));
-            }
-            Err(TranscribeError::Other(message)) => return Err(message),
+        // Try the endpoint that worked last time first, then the rest. On the very
+        // first call that's just the full candidate list in preference order.
+        let remembered = STT_ENDPOINT.lock().unwrap().clone();
+        let mut candidates = transcribe_endpoints(&profile.base_url);
+        if let Some(url) = remembered {
+            candidates.retain(|c| c != &url);
+            candidates.insert(0, url);
         }
-    }
-    Err(last_error.unwrap_or_else(|| "Couldn't transcribe the recording.".into()))
+
+        let timeout = crate::tunables::secs(&app, crate::tunables::SPEECH_STT_TIMEOUT);
+        let mut last_error = None;
+        for url in candidates {
+            match post_transcription(&url, &profile, bytes.clone(), timeout) {
+                Ok(text) => {
+                    *STT_ENDPOINT.lock().unwrap() = Some(url);
+                    return Ok(clean_transcript(&text));
+                }
+                // Only a missing route is worth trying the next candidate for. A 500,
+                // a timeout or a bad model name means we found the right endpoint and
+                // it failed for a reason the user needs to see, not a reason to go
+                // knocking on another URL.
+                Err(TranscribeError::NotFound) => {
+                    last_error = Some(format!(
+                        "No transcription endpoint found on {}. Tried the OpenAI-compatible path and whisper.cpp's /inference.",
+                        profile.base_url.trim_end_matches('/')
+                    ));
+                }
+                Err(TranscribeError::Other(message)) => return Err(message),
+            }
+        }
+        Err(last_error.unwrap_or_else(|| "Couldn't transcribe the recording.".into()))
+})
+    .await
 }
 
 enum TranscribeError {
@@ -482,143 +485,168 @@ impl SentenceSplitter {
 /// ignored: `voice-reply-sentence` { turn_id, index, text },
 /// `voice-reply-done` { turn_id, full_text }, `voice-reply-error` { turn_id, error }.
 #[tauri::command]
-pub fn voice_reply_stream(window: tauri::Window, app: tauri::AppHandle, turn_id: String, transcript: String) {
-    use tauri::Emitter;
+pub async fn voice_reply_stream(window: tauri::Window, app: tauri::AppHandle, turn_id: String, transcript: String) {
+    crate::offload(move || {
+        use tauri::Emitter;
 
-    let profile = crate::ai::llm::get_active_llm_profile(app.clone());
-    if profile.model.trim().is_empty() || profile.base_url.trim().is_empty() {
-        let _ = window.emit(
-            "voice-reply-error",
-            json!({ "turn_id": turn_id, "error": "No language model is configured (Settings -> LLM)." }),
+        let profile = crate::ai::llm::get_active_llm_profile(app.clone());
+        if profile.model.trim().is_empty() || profile.base_url.trim().is_empty() {
+            let _ = window.emit(
+                "voice-reply-error",
+                json!({ "turn_id": turn_id, "error": "No language model is configured (Settings -> LLM)." }),
+            );
+            return;
+        }
+
+        let instructions = read_config(&app).chat_instructions.unwrap_or_default();
+        let mut messages = vec![crate::ai::llm::ChatTurn {
+            role: "system".to_string(),
+            content: json!(build_system_prompt(&instructions)),
+        }];
+
+        // Anything said in an earlier conversation that bears on this question —
+        // usually nothing, which is the point. Added as its own system message,
+        // ahead of today's spoken history, so the model can tell "something you were
+        // told weeks ago" from "what we have been saying just now".
+        // Today's spoken conversation is excluded: it is already carried as history
+        // just below, and recalling it would repeat it back at the model.
+        let recalled = crate::ai::recall::context_for(
+            &app,
+            &transcript,
+            &profile.base_url,
+            &crate::ai::chat::todays_voice_chat_id(),
         );
-        return;
-    }
-
-    let instructions = read_config(&app).chat_instructions.unwrap_or_default();
-    let mut messages = vec![crate::ai::llm::ChatTurn {
-        role: "system".to_string(),
-        content: json!(build_system_prompt(&instructions)),
-    }];
-    let history = crate::ai::chat::recent_voice_turns(
-        &app,
-        crate::tunables::int(&app, crate::tunables::VOICE_HISTORY_MESSAGES) as usize,
-        crate::tunables::int(&app, crate::tunables::VOICE_HISTORY_CHARS) as usize,
-    );
-    for past in history {
+        if !recalled.block.is_empty() {
+            messages.push(crate::ai::llm::ChatTurn {
+                role: "system".to_string(),
+                content: json!(recalled.block),
+            });
+        }
+        let history = crate::ai::chat::recent_voice_turns(
+            &app,
+            crate::tunables::int(&app, crate::tunables::VOICE_HISTORY_MESSAGES) as usize,
+            crate::tunables::int(&app, crate::tunables::VOICE_HISTORY_CHARS) as usize,
+        );
+        for past in history {
+            messages.push(crate::ai::llm::ChatTurn {
+                role: past.role,
+                content: json!(past.content),
+            });
+        }
         messages.push(crate::ai::llm::ChatTurn {
-            role: past.role,
-            content: json!(past.content),
+            role: "user".to_string(),
+            content: json!(transcript.trim()),
         });
-    }
-    messages.push(crate::ai::llm::ChatTurn {
-        role: "user".to_string(),
-        content: json!(transcript.trim()),
-    });
 
-    let mut splitter = SentenceSplitter::new(
-        crate::tunables::int(&app, crate::tunables::SPEECH_MIN_SENTENCE_CHARS) as usize,
-    );
-    let mut index = 0usize;
-    let result = crate::ai::llm::run_chat_stream(
-        &profile.base_url,
-        &profile.model,
-        &profile.api_key,
-        &messages,
-        profile.think,
-        crate::tunables::int(&app, crate::tunables::VOICE_MAX_TOKENS) as u32,
-        &mut |delta| {
-            for sentence in splitter.push(delta) {
-                let _ = window.emit(
-                    "voice-reply-sentence",
-                    json!({ "turn_id": &turn_id, "index": index, "text": sentence }),
-                );
-                index += 1;
-            }
-        },
-    );
+        let mut splitter = SentenceSplitter::new(
+            crate::tunables::int(&app, crate::tunables::SPEECH_MIN_SENTENCE_CHARS) as usize,
+        );
+        let mut index = 0usize;
+        let result = crate::ai::llm::run_chat_stream(
+            &profile.base_url,
+            &profile.model,
+            &profile.api_key,
+            &messages,
+            profile.think,
+            crate::tunables::int(&app, crate::tunables::VOICE_MAX_TOKENS) as u32,
+            &mut |delta| {
+                for sentence in splitter.push(delta) {
+                    let _ = window.emit(
+                        "voice-reply-sentence",
+                        json!({ "turn_id": &turn_id, "index": index, "text": sentence }),
+                    );
+                    index += 1;
+                }
+            },
+        );
 
-    match result {
-        Ok(full) => {
-            if let Some(tail) = splitter.finish() {
-                let _ = window.emit(
-                    "voice-reply-sentence",
-                    json!({ "turn_id": &turn_id, "index": index, "text": tail }),
-                );
+        match result {
+            Ok(full) => {
+                if let Some(tail) = splitter.finish() {
+                    let _ = window.emit(
+                        "voice-reply-sentence",
+                        json!({ "turn_id": &turn_id, "index": index, "text": tail }),
+                    );
+                }
+                let cleaned = full.trim().to_string();
+                if cleaned.is_empty() {
+                    // An empty answer would otherwise end the turn silently, which
+                    // is indistinguishable from the assistant ignoring you.
+                    let _ = window.emit(
+                        "voice-reply-error",
+                        json!({ "turn_id": turn_id, "error": "The model returned an empty answer." }),
+                    );
+                    return;
+                }
+                let _ = window.emit("voice-reply-done", json!({ "turn_id": turn_id, "full_text": cleaned }));
             }
-            let cleaned = full.trim().to_string();
-            if cleaned.is_empty() {
-                // An empty answer would otherwise end the turn silently, which
-                // is indistinguishable from the assistant ignoring you.
-                let _ = window.emit(
-                    "voice-reply-error",
-                    json!({ "turn_id": turn_id, "error": "The model returned an empty answer." }),
-                );
-                return;
+            Err(error) => {
+                let _ = window.emit("voice-reply-error", json!({ "turn_id": turn_id, "error": error }));
             }
-            let _ = window.emit("voice-reply-done", json!({ "turn_id": turn_id, "full_text": cleaned }));
         }
-        Err(error) => {
-            let _ = window.emit("voice-reply-error", json!({ "turn_id": turn_id, "error": error }));
-        }
-    }
+})
+    .await
 }
 
 /// Renders text to speech and hands the audio back for the webview to play.
 #[tauri::command]
-pub fn voice_speak(app: tauri::AppHandle, text: String) -> Result<VoiceAudio, String> {
-    let profile = active_tts(&app).ok_or("No text-to-speech server is configured (Settings -> TTS).")?;
-    let url = format!("{}/audio/speech", api_base(&profile.base_url));
+pub async fn voice_speak(app: tauri::AppHandle, text: String) -> Result<VoiceAudio, String> {
+    crate::offload(move || {
+        let profile = active_tts(&app).ok_or("No text-to-speech server is configured (Settings -> TTS).")?;
+        let url = format!("{}/audio/speech", api_base(&profile.base_url));
 
-    let mut payload = json!({
-        "input": text,
-        // WAV rather than the OpenAI default of MP3: every local server in
-        // this space can emit WAV, and it needs no decoder work on our side.
-        "response_format": "wav",
-    });
-    if !profile.model.trim().is_empty() {
-        payload["model"] = json!(profile.model);
-    }
-    if !profile.voice.trim().is_empty() {
-        payload["voice"] = json!(profile.voice);
-    }
+        let mut payload = json!({
+            "input": text,
+            // WAV rather than the OpenAI default of MP3: every local server in
+            // this space can emit WAV, and it needs no decoder work on our side.
+            "response_format": "wav",
+        });
+        if !profile.model.trim().is_empty() {
+            payload["model"] = json!(profile.model);
+        }
+        if !profile.voice.trim().is_empty() {
+            payload["voice"] = json!(profile.voice);
+        }
 
-    let mut req = reqwest::blocking::Client::new()
-        .post(&url)
-        .timeout(crate::tunables::secs(&app, crate::tunables::SPEECH_TTS_TIMEOUT))
-        .json(&payload);
-    if !profile.api_key.trim().is_empty() {
-        req = req.bearer_auth(&profile.api_key);
-    }
+        let mut req = reqwest::blocking::Client::new()
+            .post(&url)
+            .timeout(crate::tunables::secs(&app, crate::tunables::SPEECH_TTS_TIMEOUT))
+            .json(&payload);
+        if !profile.api_key.trim().is_empty() {
+            req = req.bearer_auth(&profile.api_key);
+        }
 
-    let resp = req
-        .send()
-        .map_err(|e| format!("Couldn't reach the text-to-speech server: {e}"))?;
-    let status = resp.status();
-    if !status.is_success() {
-        let body = resp.text().unwrap_or_default();
-        return Err(describe_http_error(status, &body));
-    }
+        let resp = req
+            .send()
+            .map_err(|e| format!("Couldn't reach the text-to-speech server: {e}"))?;
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.text().unwrap_or_default();
+            return Err(describe_http_error(status, &body));
+        }
 
-    // Content-Type is read before consuming the body, and defaulted rather
-    // than trusted — some servers answer WAV bytes with a JSON content type.
-    let mime = resp
-        .headers()
-        .get(reqwest::header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .filter(|v| v.starts_with("audio/"))
-        .unwrap_or("audio/wav")
-        .to_string();
-    let bytes = resp
-        .bytes()
-        .map_err(|e| format!("Couldn't read the audio back: {e}"))?;
-    if bytes.is_empty() {
-        return Err("The text-to-speech server returned no audio.".into());
-    }
+        // Content-Type is read before consuming the body, and defaulted rather
+        // than trusted — some servers answer WAV bytes with a JSON content type.
+        let mime = resp
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .filter(|v| v.starts_with("audio/"))
+            .unwrap_or("audio/wav")
+            .to_string();
+        let bytes = resp
+            .bytes()
+            .map_err(|e| format!("Couldn't read the audio back: {e}"))?;
+        if bytes.is_empty() {
+            return Err("The text-to-speech server returned no audio.".into());
+        }
 
-    Ok(VoiceAudio {
-        audio_base64: base64::engine::general_purpose::STANDARD.encode(&bytes),
-        mime,
-    })
+        Ok(VoiceAudio {
+            audio_base64: base64::engine::general_purpose::STANDARD.encode(&bytes),
+            mime,
+        })
+})
+    .await
 }
 
 #[cfg(test)]
