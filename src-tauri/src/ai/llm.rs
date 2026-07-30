@@ -551,9 +551,44 @@ pub struct ChatTurn {
     pub content: serde_json::Value,
 }
 
-fn turn_has_image(turn: &ChatTurn) -> bool {
-    turn.content.is_array()
+fn turn_has_image(turn: &serde_json::Value) -> bool {
+    turn["content"].is_array()
 }
+
+/// Which server to talk to and how, for the streaming path.
+///
+/// These five always travel together and are never chosen independently — they
+/// come from one profile the user selected. Passing them as one value keeps the
+/// stream functions down to what actually varies between calls (the messages,
+/// the tools, where the tokens go).
+pub(crate) struct ChatEndpoint<'a> {
+    pub base_url: &'a str,
+    pub model: &'a str,
+    pub api_key: &'a str,
+    pub think: bool,
+    pub max_tokens: u32,
+}
+
+/// What one streamed request produced.
+///
+/// A turn is either an answer or a request to call tools — never usefully
+/// both, in every response observed — but the two are carried together rather
+/// than as an enum because a model that emits a sentence of preamble alongside
+/// its call should not have that sentence thrown away before the caller can
+/// decide what to do with it.
+pub(crate) struct StreamOutcome {
+    pub text: String,
+    pub calls: Vec<crate::ai::tools::ToolCall>,
+}
+
+/// Cap on how many times one message may bounce through tools before the model
+/// has to answer with what it has.
+///
+/// Without a cap a model that keeps rewording the same failing search never
+/// terminates. Five is enough for "search, then read two of the results" and
+/// short enough that a runaway costs seconds rather than minutes — each round
+/// is a full request whose prompt has grown by the previous round's result.
+const MAX_TOOL_ROUNDS: usize = 5;
 
 // The chat UI's send button. Streams tokens back to the SAME window that
 // invoked it (never broadcast app-wide — a second chat conversation open
@@ -562,6 +597,7 @@ fn turn_has_image(turn: &ChatTurn) -> bool {
 // the final (artifact-stripped) text, or chat-stream-error.
 #[tauri::command]
 pub async fn send_chat_message(
+    app: tauri::AppHandle,
     window: tauri::Window,
     chat_id: String,
     base_url: String,
@@ -572,21 +608,85 @@ pub async fn send_chat_message(
     messages: Vec<ChatTurn>,
 ) {
     crate::offload(move || {
-        let result = run_chat_stream(&base_url, &model, &api_key, &messages, think, max_tokens, &mut |delta| {
-            let _ = window.emit("chat-stream-chunk", json!({ "chat_id": &chat_id, "delta": delta }));
-        });
-        match result {
-            Ok(full_text) => {
-                let _ = window.emit(
-                    "chat-stream-done",
-                    json!({ "chat_id": chat_id, "full_text": strip_model_artifacts(&full_text) }),
-                );
+        // Converted once, here, because the tool loop appends message shapes
+        // ChatTurn cannot express (an assistant turn carrying `tool_calls`, a
+        // `role: "tool"` result). Everything below this line works in the wire
+        // shape the servers actually take.
+        let mut wire: Vec<serde_json::Value> = messages
+            .iter()
+            .map(|m| json!({"role": m.role, "content": m.content}))
+            .collect();
+
+        let endpoint = ChatEndpoint {
+            base_url: &base_url,
+            model: &model,
+            api_key: &api_key,
+            think,
+            max_tokens,
+        };
+        let specs = crate::ai::tools::specs(&app);
+        let offered: Vec<serde_json::Value> = specs.iter().map(|s| s.to_wire()).collect();
+
+        let mut answer = String::new();
+        for round in 0..=MAX_TOOL_ROUNDS {
+            // On the final round the tools are withheld. Leaving them offered
+            // would let the model spend its last turn asking for another call
+            // that will never run, and the user would get nothing at all —
+            // taking them away forces it to answer from what it has gathered.
+            let tools_this_round: &[serde_json::Value] =
+                if round == MAX_TOOL_ROUNDS { &[] } else { &offered };
+
+            let result = run_chat_stream(
+                &endpoint,
+                &wire,
+                tools_this_round,
+                &mut |delta| {
+                    let _ = window
+                        .emit("chat-stream-chunk", json!({ "chat_id": &chat_id, "delta": delta }));
+                },
+            );
+
+            let outcome = match result {
+                Ok(outcome) => outcome,
+                Err(error) => {
+                    let _ = window
+                        .emit("chat-stream-error", json!({ "chat_id": chat_id, "error": error }));
+                    return;
+                }
+            };
+
+            if outcome.calls.is_empty() {
+                answer = outcome.text;
+                break;
             }
-            Err(error) => {
-                let _ = window.emit("chat-stream-error", json!({ "chat_id": chat_id, "error": error }));
+
+            wire.push(crate::ai::tools::assistant_call_message(&outcome.calls));
+            for call in &outcome.calls {
+                // The UI needs this to say what is happening and to drop the
+                // preamble streamed alongside the call — a tool run is seconds
+                // of silence otherwise, which reads as a hang.
+                let _ = window.emit(
+                    "chat-tool-start",
+                    json!({ "chat_id": &chat_id, "tool": &call.name, "arguments": &call.arguments }),
+                );
+                let outcome = crate::ai::tools::execute(&app, call);
+                let _ = window.emit(
+                    "chat-tool-done",
+                    json!({
+                        "chat_id": &chat_id,
+                        "tool": &call.name,
+                        "sources": &outcome.sources,
+                    }),
+                );
+                wire.push(crate::ai::tools::tool_result_message(call, &outcome.text));
             }
         }
-})
+
+        let _ = window.emit(
+            "chat-stream-done",
+            json!({ "chat_id": chat_id, "full_text": strip_model_artifacts(&answer) }),
+        );
+    })
     .await
 }
 
@@ -599,14 +699,11 @@ pub async fn send_chat_message(
 // (rather than failing before any output) is accepted as it mirrors the
 // same probe-then-fallback tradeoff the non-streaming path already makes.
 pub(crate) fn run_chat_stream(
-    base_url: &str,
-    model: &str,
-    api_key: &str,
-    messages: &[ChatTurn],
-    think: bool,
-    max_tokens: u32,
+    endpoint: &ChatEndpoint<'_>,
+    messages: &[serde_json::Value],
+    tools: &[serde_json::Value],
     on_delta: &mut dyn FnMut(&str),
-) -> Result<String, String> {
+) -> Result<StreamOutcome, String> {
     // Ollama's native /api/chat takes images via a separate per-message
     // `images` array, not inline in `content` — rather than juggling two
     // request shapes, an attachment just skips straight to the
@@ -615,38 +712,45 @@ pub(crate) fn run_chat_stream(
     // vision-capable models.
     let has_image = messages.iter().any(turn_has_image);
     if !has_image {
-        if let Some(Ok(text)) = ollama_native_chat_stream(base_url, model, api_key, messages, think, on_delta) {
-            if !text.is_empty() {
-                return Ok(text);
+        if let Some(Ok(outcome)) = ollama_native_chat_stream(endpoint, messages, tools, on_delta)
+        {
+            // A turn that asked for a tool is a real result even though it
+            // carries no text — checking only the text would send it down the
+            // fallback path and run the whole request a second time.
+            if !outcome.text.is_empty() || !outcome.calls.is_empty() {
+                return Ok(outcome);
             }
         }
     }
-    openai_chat_stream(base_url, model, api_key, messages, max_tokens, think, on_delta)
+    openai_chat_stream(endpoint, messages, tools, on_delta)
 }
 
 fn ollama_native_chat_stream(
-    base_url: &str,
-    model: &str,
-    api_key: &str,
-    messages: &[ChatTurn],
-    think: bool,
+    endpoint: &ChatEndpoint<'_>,
+    messages: &[serde_json::Value],
+    tools: &[serde_json::Value],
     on_delta: &mut dyn FnMut(&str),
-) -> Option<Result<String, String>> {
+) -> Option<Result<StreamOutcome, String>> {
+    let ChatEndpoint { base_url, model, api_key, think, .. } = *endpoint;
     if ollama_native_known_missing(base_url) {
         return None;
     }
     let root = base_url.trim_end_matches('/').strip_suffix("/v1")?;
     let url = format!("{root}/api/chat");
-    let msgs: Vec<serde_json::Value> = messages
-        .iter()
-        .map(|m| json!({"role": m.role, "content": m.content}))
-        .collect();
 
-    let result = (|| -> Result<String, String> {
+    let result = (|| -> Result<StreamOutcome, String> {
+        let mut payload =
+            json!({ "model": model, "messages": messages, "stream": true, "think": think });
+        // Omitted entirely when there is nothing to offer — an empty array is
+        // not the same as no tools to every server, and describing nothing
+        // still costs prompt tokens.
+        if !tools.is_empty() {
+            payload["tools"] = json!(tools);
+        }
         let mut req = reqwest::blocking::Client::new()
             .post(&url)
             .timeout(std::time::Duration::from_secs(120))
-            .json(&json!({ "model": model, "messages": msgs, "stream": true, "think": think }));
+            .json(&payload);
         if !api_key.trim().is_empty() {
             req = req.bearer_auth(api_key);
         }
@@ -662,6 +766,7 @@ fn ollama_native_chat_stream(
         }
 
         let mut full = String::new();
+        let mut calls = Vec::new();
         for line in BufReader::new(resp).lines() {
             let line = line.map_err(|e| format!("stream read error: {e}"))?;
             if line.trim().is_empty() {
@@ -676,11 +781,17 @@ fn ollama_native_chat_stream(
                     full.push_str(delta);
                 }
             }
+            // Unlike text, a tool call is not streamed piece by piece here:
+            // measured against a live server, the whole call arrives complete
+            // in one chunk (with `done: false`), followed by a final empty
+            // `done: true` chunk. So it can simply be parsed where it lands —
+            // no accumulation, no partial-JSON handling.
+            calls.extend(crate::ai::tools::parse_tool_calls(&obj["message"]));
             if obj["done"].as_bool() == Some(true) {
                 break;
             }
         }
-        Ok(full)
+        Ok(StreamOutcome { text: full, calls })
     })();
 
     Some(result)
@@ -689,30 +800,28 @@ fn ollama_native_chat_stream(
 // OpenAI-compatible `stream: true` — server-sent events, each line
 // `data: {...}` (or the literal `data: [DONE]` sentinel).
 fn openai_chat_stream(
-    base_url: &str,
-    model: &str,
-    api_key: &str,
-    messages: &[ChatTurn],
-    max_tokens: u32,
-    think: bool,
+    endpoint: &ChatEndpoint<'_>,
+    messages: &[serde_json::Value],
+    tools: &[serde_json::Value],
     on_delta: &mut dyn FnMut(&str),
-) -> Result<String, String> {
+) -> Result<StreamOutcome, String> {
+    let ChatEndpoint { base_url, model, api_key, think, max_tokens } = *endpoint;
     let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
-    let msgs: Vec<serde_json::Value> = messages
-        .iter()
-        .map(|m| json!({"role": m.role, "content": m.content}))
-        .collect();
     let key = quirks_key(base_url, model);
     // The parameter retry happens before a single SSE line is read, so a
     // rejected request never produces a half-streamed answer the user has to
     // watch get discarded.
     let resp = post_chat_request(&url, api_key, 120, &key, |q| {
-        let mut payload = json!({ "model": model, "messages": msgs, "stream": true });
+        let mut payload = json!({ "model": model, "messages": messages, "stream": true });
         apply_model_params(&mut payload, q, Some(max_tokens), think);
+        if !tools.is_empty() {
+            payload["tools"] = json!(tools);
+        }
         payload
     })?;
 
     let mut full = String::new();
+    let mut partial = PartialToolCalls::default();
     for line in BufReader::new(resp).lines() {
         let line = line.map_err(|e| format!("stream read error: {e}"))?;
         let Some(data) = line.strip_prefix("data: ") else {
@@ -724,14 +833,91 @@ fn openai_chat_stream(
         let Ok(obj) = serde_json::from_str::<serde_json::Value>(data) else {
             continue;
         };
-        if let Some(delta) = obj["choices"][0]["delta"]["content"].as_str() {
-            if !delta.is_empty() {
-                on_delta(delta);
-                full.push_str(delta);
+        let delta = &obj["choices"][0]["delta"];
+        if let Some(text) = delta["content"].as_str() {
+            if !text.is_empty() {
+                on_delta(text);
+                full.push_str(text);
+            }
+        }
+        partial.absorb(delta);
+    }
+    Ok(StreamOutcome {
+        text: full,
+        calls: partial.finish(),
+    })
+}
+
+/// Accumulator for tool calls arriving over SSE.
+///
+/// This is the one place the two endpoints genuinely differ in difficulty.
+/// Ollama's native stream hands over a whole call in a single chunk, but the
+/// OpenAI-compatible format splits one call across many `delta.tool_calls`
+/// fragments: the first carries the id and function name, and the argument
+/// JSON dribbles in as string pieces that are only valid once concatenated.
+/// The `index` field — not the id, which later fragments omit — is what ties
+/// the pieces of one call together when several are requested at once.
+///
+/// Reconstructed from the documented format rather than from a captured
+/// response: the shim under test emitted its tool call without splitting it,
+/// so the fragmented path here has not been seen firsthand. It degrades to the
+/// single-chunk case correctly, which is what that server does.
+#[derive(Default)]
+struct PartialToolCalls {
+    /// Keyed by `index` and ordered by it, so several calls in one turn come
+    /// back in the order the model asked for them.
+    by_index: std::collections::BTreeMap<i64, (String, String, String)>,
+}
+
+impl PartialToolCalls {
+    fn absorb(&mut self, delta: &serde_json::Value) {
+        let Some(fragments) = delta["tool_calls"].as_array() else {
+            return;
+        };
+        for fragment in fragments {
+            let index = fragment["index"].as_i64().unwrap_or(0);
+            let entry = self.by_index.entry(index).or_default();
+            if let Some(id) = fragment["id"].as_str() {
+                if !id.is_empty() {
+                    entry.0 = id.to_string();
+                }
+            }
+            if let Some(name) = fragment["function"]["name"].as_str() {
+                if !name.is_empty() {
+                    entry.1 = name.to_string();
+                }
+            }
+            match &fragment["function"]["arguments"] {
+                serde_json::Value::String(piece) => entry.2.push_str(piece),
+                // Not the documented streaming shape, but a server that sends
+                // the arguments whole as an object should not be discarded for
+                // being easier than expected.
+                object @ serde_json::Value::Object(_) => entry.2 = object.to_string(),
+                _ => {}
             }
         }
     }
-    Ok(full)
+
+    fn finish(self) -> Vec<crate::ai::tools::ToolCall> {
+        let calls: Vec<serde_json::Value> = self
+            .by_index
+            .into_iter()
+            .filter(|(_, (_, name, _))| !name.is_empty())
+            .map(|(_, (id, name, arguments))| {
+                json!({
+                    "id": id,
+                    "type": "function",
+                    "function": { "name": name, "arguments": arguments },
+                })
+            })
+            .collect();
+        if calls.is_empty() {
+            return Vec::new();
+        }
+        // Reuses the same parser the non-streaming shapes go through, so the
+        // string-vs-object argument handling has exactly one implementation.
+        crate::ai::tools::parse_tool_calls(&json!({ "tool_calls": calls }))
+    }
 }
 
 // "Thinking" models leak their whole internal reasoning (<think>...</think>)

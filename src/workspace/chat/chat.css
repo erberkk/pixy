@@ -721,3 +721,82 @@
      a misplaced note rather than a broken layout. */
   justify-content: flex-end;
 }
+
+/* Shown in place of the answer while a tool runs (chat.js's chat-tool-start
+   listener). A tool round is a whole second request to the model with a
+   network fetch in between — tens of seconds locally — and without this the
+   bubble simply sits empty, which is indistinguishable from a hang. The pulse
+   is the part that says "still working" rather than "stopped". */
+.chat-tool-running {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-dim);
+  font-family: var(--mono);
+  animation: toolPulse 1.4s ease-in-out infinite;
+}
+.chat-tool-running::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex: none;
+}
+
+@keyframes toolPulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+
+/* Someone who has turned motion down should still see that something is
+   happening, just without the throb. */
+@media (prefers-reduced-motion: reduce) {
+  .chat-tool-running {
+    animation: none;
+    opacity: 0.85;
+  }
+}
+
+/* Pages the model actually read, under the reply (chat.js's webSourcesHtml).
+   Mirrors .chat-recall-note above the bubble: same reasoning, same quietness —
+   an answer whose sources can be opened and checked is a different thing from
+   one that only claims them. Buttons rather than links because a bare href in a
+   webview navigates the app away from itself. */
+.chat-sources {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: #777;
+  margin: 4px 0 0 2px;
+}
+.chat-source {
+  max-width: 100%;
+  /* The title is the useful part and can be long; truncating beats wrapping a
+     row of chips into a wall. The full URL is in the title attribute. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 2px 7px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text-dim);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s var(--ease);
+}
+.chat-source:hover {
+  background: var(--bg-elevated-hover);
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.chat-msg.user .chat-sources {
+  /* A user turn never has sources; kept as a guard so an indexing mistake shows
+     up as misplaced chips rather than a broken layout. */
+  justify-content: flex-end;
+}

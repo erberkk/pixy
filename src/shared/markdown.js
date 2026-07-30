@@ -9,6 +9,19 @@ export function escapeHtml(str) {
   return d.innerHTML;
 }
 
+// For a value going into a quoted HTML attribute rather than into text.
+//
+// escapeHtml alone is NOT enough there, and the reason is easy to miss: it works
+// by setting textContent and reading innerHTML back, and that serialisation
+// escapes & < > but leaves quotes alone — because a quote in text position needs
+// no escaping. Inside `attr="..."` it very much does: one double quote ends the
+// attribute and everything after it is parsed as markup. That matters most for
+// values that came off the internet (a URL from a search result is written by
+// whoever owns the page), which is exactly where this gets used.
+export function escapeAttr(str) {
+  return escapeHtml(str).replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
 export function inlineMd(text) {
   text = escapeHtml(text);
   text = text.replace(/\[\[([^\]]+)\]\]/g, (m, p1) => '<a class="wiki-link" data-note="' + p1.replace(/"/g, "&quot;") + '">' + p1 + "</a>");

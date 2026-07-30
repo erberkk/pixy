@@ -385,6 +385,19 @@ tunables! {
          else's server the moment you point a profile at a hosted API. Local \
          models are unaffected either way.";
 
+    // --- Web -----------------------------------------------------------------
+    WEB_TOOLS_ENABLED = "web.tools_enabled", "Web",
+        "Let the model read web pages and search", "",
+        Kind::Toggle { default: true },
+        restart: false,
+        "On by default: without it a local model can only answer from what it was \
+         trained on, and has no way to look at a link you paste. With it on, the \
+         model decides when to fetch a page or run a search — so the address it \
+         reads, and the words it searches for, leave this machine. Nothing else \
+         does: your conversation is not sent anywhere by this. Sources used are \
+         free ones that need no account, and turning this off removes the tools \
+         entirely rather than just hiding them.";
+
     // --- GitHub --------------------------------------------------------------
     GITHUB_DIGEST_HOUR = "github.digest_hour", "GitHub",
         "Daily digest after", "o'clock",

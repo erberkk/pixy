@@ -752,7 +752,7 @@ pub fn search_hybrid(
     }
 
     let word_ids: Vec<i64> = by_words.iter().map(|(id, _)| *id).collect();
-    let ordered = fuse(&word_ids, &by_meaning);
+    let ordered = fuse(&[&word_ids, &by_meaning]);
 
     let mut hits: Vec<Hit> = Vec::new();
     for id in ordered {
@@ -1077,10 +1077,13 @@ fn similar_turns(
 /// about two arbitrary units. Fusing by POSITION needs no such guess, and a turn
 /// that both methods rank highly beats one that only one of them found — which
 /// is exactly the judgement wanted.
-fn fuse(word_ranked: &[i64], meaning_ranked: &[i64]) -> Vec<i64> {
+/// Takes any number of ranked lists, because the same problem shows up again
+/// with more than two: web/search.rs fuses one list per search source, which
+/// are no more comparable to each other than BM25 is to cosine.
+pub(crate) fn fuse(ranked_lists: &[&[i64]]) -> Vec<i64> {
     const K: f32 = 60.0; // the standard damping constant for RRF
     let mut scores: std::collections::HashMap<i64, f32> = std::collections::HashMap::new();
-    for list in [word_ranked, meaning_ranked] {
+    for list in ranked_lists {
         for (rank, id) in list.iter().enumerate() {
             *scores.entry(*id).or_insert(0.0) += 1.0 / (K + rank as f32 + 1.0);
         }
@@ -2605,10 +2608,10 @@ mod tests {
     fn fusion_prefers_what_both_methods_found() {
         // 7 is second-best on words and second-best on meaning; 1 and 2 each top
         // exactly one list. Agreement beats being first in one ranking.
-        assert_eq!(fuse(&[1, 7, 3], &[2, 7, 4])[0], 7);
+        assert_eq!(fuse(&[&[1, 7, 3], &[2, 7, 4]])[0], 7);
         // Either list alone still orders sensibly.
-        assert_eq!(fuse(&[5, 6], &[]), vec![5, 6]);
-        assert_eq!(fuse(&[], &[5, 6]), vec![5, 6]);
+        assert_eq!(fuse(&[&[5, 6], &[]]), vec![5, 6]);
+        assert_eq!(fuse(&[&[], &[5, 6]]), vec![5, 6]);
     }
 
     #[test]

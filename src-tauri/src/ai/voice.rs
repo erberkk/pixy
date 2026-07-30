@@ -499,10 +499,10 @@ pub async fn voice_reply_stream(window: tauri::Window, app: tauri::AppHandle, tu
         }
 
         let instructions = read_config(&app).chat_instructions.unwrap_or_default();
-        let mut messages = vec![crate::ai::llm::ChatTurn {
-            role: "system".to_string(),
-            content: json!(build_system_prompt(&instructions)),
-        }];
+        let mut messages = vec![json!({
+            "role": "system",
+            "content": build_system_prompt(&instructions),
+        })];
 
         // Anything said in an earlier conversation that bears on this question —
         // usually nothing, which is the point. Added as its own system message,
@@ -517,10 +517,7 @@ pub async fn voice_reply_stream(window: tauri::Window, app: tauri::AppHandle, tu
             &crate::ai::chat::todays_voice_chat_id(),
         );
         if !recalled.block.is_empty() {
-            messages.push(crate::ai::llm::ChatTurn {
-                role: "system".to_string(),
-                content: json!(recalled.block),
-            });
+            messages.push(json!({"role": "system", "content": recalled.block}));
         }
         let history = crate::ai::chat::recent_voice_turns(
             &app,
@@ -528,27 +525,29 @@ pub async fn voice_reply_stream(window: tauri::Window, app: tauri::AppHandle, tu
             crate::tunables::int(&app, crate::tunables::VOICE_HISTORY_CHARS) as usize,
         );
         for past in history {
-            messages.push(crate::ai::llm::ChatTurn {
-                role: past.role,
-                content: json!(past.content),
-            });
+            messages.push(json!({"role": past.role, "content": past.content}));
         }
-        messages.push(crate::ai::llm::ChatTurn {
-            role: "user".to_string(),
-            content: json!(transcript.trim()),
-        });
+        messages.push(json!({"role": "user", "content": transcript.trim()}));
 
         let mut splitter = SentenceSplitter::new(
             crate::tunables::int(&app, crate::tunables::SPEECH_MIN_SENTENCE_CHARS) as usize,
         );
         let mut index = 0usize;
+        let endpoint = crate::ai::llm::ChatEndpoint {
+            base_url: &profile.base_url,
+            model: &profile.model,
+            api_key: &profile.api_key,
+            think: profile.think,
+            max_tokens: crate::tunables::int(&app, crate::tunables::VOICE_MAX_TOKENS) as u32,
+        };
         let result = crate::ai::llm::run_chat_stream(
-            &profile.base_url,
-            &profile.model,
-            &profile.api_key,
+            &endpoint,
             &messages,
-            profile.think,
-            crate::tunables::int(&app, crate::tunables::VOICE_MAX_TOKENS) as u32,
+            // No tools for the spoken path, deliberately. A tool round is a
+            // second full request — measured at ~19s on this machine's model —
+            // and a voice assistant that goes silent that long has failed at
+            // the one thing it is for. Typed chat pays that cost willingly.
+            &[],
             &mut |delta| {
                 for sentence in splitter.push(delta) {
                     let _ = window.emit(
@@ -568,7 +567,7 @@ pub async fn voice_reply_stream(window: tauri::Window, app: tauri::AppHandle, tu
                         json!({ "turn_id": &turn_id, "index": index, "text": tail }),
                     );
                 }
-                let cleaned = full.trim().to_string();
+                let cleaned = full.text.trim().to_string();
                 if cleaned.is_empty() {
                     // An empty answer would otherwise end the turn silently, which
                     // is indistinguishable from the assistant ignoring you.

@@ -4,7 +4,7 @@
 // agent/server.rs — this is a plain user <-> local-model chat.
 import { initPip, setPipState } from "../../mascot/pip/pip.js";
 import { invoke, listen } from "../../shared/tauri.js";
-import { bindCopyButton, copyText, escapeHtml, markdownToHtml } from "../../shared/markdown.js";
+import { bindCopyButton, copyText, escapeAttr, escapeHtml, markdownToHtml } from "../../shared/markdown.js";
 import { timeAgo } from "../../shared/format.js";
 import { showToast } from "../lib/toast.js";
 import {
@@ -229,6 +229,7 @@ async function openChat(id) {
   // would pin a recall note to whatever message happens to sit at that position
   // in the next one.
   recalledByIndex = new Map();
+  webSourcesByIndex = new Map();
   chatTitleInput.value = chat.title || "";
   pendingAttachments = [];
   renderPendingAttachments();
@@ -244,6 +245,7 @@ function newChat() {
   activeChatId = null;
   activeChatMessages = [];
   recalledByIndex = new Map();
+  webSourcesByIndex = new Map();
   chatTitleInput.value = "";
   pendingAttachments = [];
   renderPendingAttachments();
@@ -283,6 +285,34 @@ function recallNoteHtml(index) {
     })
     .join(", ");
   return `<div class="chat-recall-note" title="Added to this question from your earlier conversations">↩ ${items}</div>`;
+}
+
+// What the model looked at on the web to answer a given message index. Session
+// only, for the same reason as recalledByIndex above.
+let webSourcesByIndex = new Map();
+
+function webSourcesHtml(index) {
+  const sources = webSourcesByIndex.get(index);
+  if (!sources?.length) return "";
+  // Real links, not just names: the whole value of showing these is that the
+  // user can open one and see whether the answer is actually in it. Opened
+  // through the opener plugin rather than a bare href, which inside a webview
+  // would navigate the app itself.
+  const items = sources
+    .map(
+      (s) =>
+        // escapeAttr, not escapeHtml, for the two attributes — see its comment:
+        // these values came from a web page, and escapeHtml leaves quotes alone.
+        '<button type="button" class="chat-source" data-url="' +
+        escapeAttr(s.url) +
+        '" title="' +
+        escapeAttr(s.url) +
+        '">' +
+        escapeHtml(s.title || s.url) +
+        "</button>",
+    )
+    .join("");
+  return '<div class="chat-sources">Read from the web: ' + items + "</div>";
 }
 
 // Cards for the files attached to a saved message. Same look as the pending
@@ -371,6 +401,10 @@ function renderMessages() {
         // bubble. Clicking one opens its contents; the transcript stays about
         // what was asked.
         messageAttachmentsHtml(m, index) +
+        // Pages the model read to write this. Below the bubble, like the recall
+        // note above it: neither is something the model said, both are why it
+        // knew.
+        webSourcesHtml(index) +
         // Copies the message's own markdown source, not the rendered HTML —
         // read from activeChatMessages by index rather than scraped back out of
         // the DOM, so what lands on the clipboard is exactly what the model
@@ -751,6 +785,59 @@ listen("chat-stream-done", (event) => {
   const last = activeChatMessages[activeChatMessages.length - 1];
   if (last && last.role === "assistant") last.content = full_text || streamingText;
   finishStreaming();
+});
+
+// A tool round is a second full request to the model with a page fetch in
+// between — measured at 20-40s on a local 9B model. Without something on
+// screen that whole stretch is a frozen bubble, which reads as a crash.
+listen("chat-tool-start", (event) => {
+  const { chat_id, tool, arguments: args } = event.payload;
+  if (chat_id !== streamingChatId) return;
+  // Whatever the model said before asking for the tool ("let me look that
+  // up") is preamble, not the answer: chat-stream-done replaces the bubble
+  // with the final text anyway, so clearing here stops the two from being
+  // visibly concatenated while the tool runs.
+  streamingText = "";
+  const detail = tool === "web_search" ? args?.query : args?.url;
+  const label =
+    tool === "web_search"
+      ? "Searching the web"
+      : tool === "fetch_url"
+        ? "Reading the page"
+        : tool;
+  const last = activeChatMessages[activeChatMessages.length - 1];
+  if (last && last.role === "assistant") last.content = "";
+  const bubble = lastBubbleEl();
+  if (bubble) {
+    bubble.innerHTML =
+      '<span class="chat-tool-running">' +
+      escapeHtml(label) +
+      (detail ? " — " + escapeHtml(String(detail)) : "") +
+      "</span>";
+    if (chatNearBottom()) chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
+  }
+});
+
+listen("chat-tool-done", (event) => {
+  const { chat_id, sources } = event.payload;
+  if (chat_id !== streamingChatId) return;
+  if (!sources?.length) return;
+  // Keyed to the assistant message being written, which is the last one — the
+  // same indexing recalledByIndex uses. Appended rather than replaced: two
+  // rounds (search, then read one of the results) both belong to this answer.
+  const index = activeChatMessages.length - 1;
+  const existing = webSourcesByIndex.get(index) || [];
+  const seen = new Set(existing.map((s) => s.url));
+  webSourcesByIndex.set(index, existing.concat(sources.filter((s) => !seen.has(s.url))));
+});
+
+// Opened through the opener plugin, never as a link: a bare href inside a
+// webview navigates the app's own window away from itself.
+chatMessagesEl.addEventListener("click", (event) => {
+  const button = event.target.closest(".chat-source");
+  if (!button) return;
+  const url = button.dataset.url;
+  if (url) invoke("open_in_browser", { url }).catch((err) => showToast(String(err)));
 });
 
 listen("chat-stream-error", (event) => {

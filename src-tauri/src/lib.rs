@@ -10,6 +10,7 @@ mod github;
 mod system;
 mod tunables;
 mod ui;
+mod web;
 
 use tauri::utils::config::Color;
 use tauri::Manager;
