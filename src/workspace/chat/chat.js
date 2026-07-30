@@ -71,6 +71,9 @@ function renderModelSelect() {
 chatModelSelect.addEventListener("change", () => {
   activeLlmProfileId = chatModelSelect.value;
   invoke("set_active_llm_profile", { profileId: activeLlmProfileId });
+  // The picture that was fine a moment ago may be unreadable to the model just
+  // picked, or the other way round.
+  refreshVisionWarning();
 });
 
 export async function loadChatMode() {
@@ -230,6 +233,7 @@ async function openChat(id) {
   // in the next one.
   recalledByIndex = new Map();
   webSourcesByIndex = new Map();
+  generatedByIndex = new Map();
   chatTitleInput.value = chat.title || "";
   pendingAttachments = [];
   renderPendingAttachments();
@@ -239,6 +243,10 @@ async function openChat(id) {
   }
   renderMessages();
   renderChatList();
+  // Pictures are read back afterwards rather than before the first paint: the
+  // conversation should appear at once, with each picture filling in as it
+  // arrives.
+  loadGeneratedImages();
 }
 
 function newChat() {
@@ -246,6 +254,7 @@ function newChat() {
   activeChatMessages = [];
   recalledByIndex = new Map();
   webSourcesByIndex = new Map();
+  generatedByIndex = new Map();
   chatTitleInput.value = "";
   pendingAttachments = [];
   renderPendingAttachments();
@@ -290,6 +299,58 @@ function recallNoteHtml(index) {
 // What the model looked at on the web to answer a given message index. Session
 // only, for the same reason as recalledByIndex above.
 let webSourcesByIndex = new Map();
+
+// Data URLs for generated pictures, by message index. The chat file stores only
+// the path (see ChatMessage.image_path), so reopening a conversation refills
+// this from disk — held here rather than on the message so the bytes are never
+// what gets saved.
+let generatedByIndex = new Map();
+
+function generatedImageHtml(message, index) {
+  if (!message.image_path) return "";
+  const src = generatedByIndex.get(index);
+  if (!src) {
+    // Still being read off disk; the placeholder keeps the layout from jumping
+    // when it arrives.
+    return '<div class="chat-generated loading">Loading picture…</div>';
+  }
+  return (
+    '<div class="chat-generated">' +
+    '<img src="' +
+    escapeAttr(src) +
+    '" alt="" data-path="' +
+    escapeAttr(message.image_path) +
+    '" />' +
+    '<div class="chat-generated-meta">' +
+    escapeHtml(message.image_meta || "") +
+    '<button type="button" class="chat-generated-open" data-path="' +
+    escapeAttr(message.image_path) +
+    '">Open folder</button>' +
+    "</div>" +
+    "</div>"
+  );
+}
+
+// Fills generatedByIndex for a conversation that was just opened. Reads run in
+// parallel and the list is re-rendered once at the end rather than per picture,
+// so a chat with several does not repaint for each.
+async function loadGeneratedImages() {
+  const wanted = activeChatMessages
+    .map((m, index) => [index, m.image_path])
+    .filter(([index, path]) => path && !generatedByIndex.has(index));
+  if (!wanted.length) return;
+  const results = await Promise.all(
+    wanted.map(([, path]) => invoke("read_generated_image", { path }).catch(() => null)),
+  );
+  let any = false;
+  wanted.forEach(([index], i) => {
+    if (results[i]) {
+      generatedByIndex.set(index, results[i]);
+      any = true;
+    }
+  });
+  if (any) renderMessages();
+}
 
 function webSourcesHtml(index) {
   const sources = webSourcesByIndex.get(index);
@@ -401,6 +462,8 @@ function renderMessages() {
         // bubble. Clicking one opens its contents; the transcript stays about
         // what was asked.
         messageAttachmentsHtml(m, index) +
+        // A picture this turn produced, if it was a /image command.
+        generatedImageHtml(m, index) +
         // Pages the model read to write this. Below the bubble, like the recall
         // note above it: neither is something the model said, both are why it
         // knew.
@@ -455,6 +518,7 @@ async function attachFile() {
   }
   pendingAttachments.push(attachment);
   renderPendingAttachments();
+  refreshVisionWarning();
   // Truncation has to be visible at attach time, not discovered later in the
   // transcript: the user may want to raise the limit or attach less.
   if (attachment.full_chars > attachment.data.length) {
@@ -482,15 +546,46 @@ function attachmentDetail(attachment) {
   return attachment.full_chars > attachment.data.length ? `${shown} · truncated` : shown;
 }
 
+// Whether the selected model can read images, as far as its server will say.
+// Only Ollama answers this; anything else leaves `known` false and no warning
+// is shown, because a warning on a setup that actually works teaches the user
+// to ignore warnings.
+let visionWarning = "";
+
+async function refreshVisionWarning() {
+  const previous = visionWarning;
+  visionWarning = "";
+  const profile = llmProfiles.find((p) => p.id === activeLlmProfileId);
+  if (profile && pendingAttachments.some((a) => a.kind === "image")) {
+    const caps = await invoke("get_model_capabilities", {
+      baseUrl: profile.base_url,
+      model: profile.model,
+      apiKey: profile.api_key || "",
+    }).catch(() => null);
+    if (caps?.known && !caps.vision) {
+      visionWarning =
+        (profile.label || profile.model) +
+        " cannot read images — it will only see your text. Pick a model with vision to ask about this picture.";
+    }
+  }
+  // Re-render only on a change, so the check (which can involve a request)
+  // cannot loop through the render that triggered it.
+  if (visionWarning !== previous) renderPendingAttachments();
+}
+
 function renderPendingAttachments() {
   const box = el("chatAttachments");
   if (!pendingAttachments.length) {
     box.style.display = "none";
     box.innerHTML = "";
+    visionWarning = "";
     return;
   }
   box.style.display = "flex";
-  box.innerHTML = pendingAttachments
+  const warning = visionWarning
+    ? '<div class="chat-attachment-warning">' + escapeHtml(visionWarning) + "</div>"
+    : "";
+  box.innerHTML = warning + pendingAttachments
     .map((attachment, index) => {
       const remove =
         '<button type="button" class="chat-attachment-remove" data-index="' +
@@ -605,10 +700,52 @@ function inlineAttachment(attachment) {
   return `${heading}\n\`\`\`${attachment.lang}\n${body}\n\`\`\``;
 }
 
+// Drawing is a direct action, not something the model decides to do — see the
+// comment at the top of ai/images.rs. "/image a red fox" is unambiguous, so it
+// goes straight to the image server; routing it through the model would add a
+// full round of generation to interpret a request that needs no interpreting,
+// and hand back a file path the model cannot look at anyway.
+const IMAGE_COMMAND = /^\/(image|görsel|gorsel)\s+/i;
+
+async function generateImageTurn(prompt) {
+  activeChatMessages.push({ role: "user", content: "/image " + prompt, ts: Date.now() });
+  activeChatMessages.push({ role: "assistant", content: "", ts: Date.now() });
+  const index = activeChatMessages.length - 1;
+  renderMessages();
+  const bubble = lastBubbleEl();
+  if (bubble) {
+    bubble.innerHTML = '<span class="chat-tool-running">Drawing — ' + escapeHtml(prompt) + "</span>";
+  }
+  chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
+
+  try {
+    const image = await invoke("generate_image", { prompt });
+    // The bytes go in the message only for this session; what is saved is the
+    // path (see ai/images.rs). Chat files hold no image data by design.
+    generatedByIndex.set(index, image.data_url);
+    activeChatMessages[index].content = "";
+    activeChatMessages[index].image_path = image.path;
+    activeChatMessages[index].image_meta =
+      image.width + "×" + image.height + " · " + image.seconds.toFixed(1) + "s";
+  } catch (err) {
+    activeChatMessages[index].content = "⚠ " + String(err);
+  }
+  renderMessages();
+  persistActiveChat();
+}
+
 async function sendChatMessage() {
   const text = chatInput.value.trim();
   const attachments = pendingAttachments;
   if ((!text && !attachments.length) || sendingMessage) return;
+
+  if (IMAGE_COMMAND.test(text)) {
+    chatInput.value = "";
+    chatInput.style.height = "auto";
+    await generateImageTurn(text.replace(IMAGE_COMMAND, "").trim());
+    return;
+  }
+
   const profile = llmProfiles.find((p) => p.id === activeLlmProfileId) || llmProfiles[0];
   if (!profile) {
     showToast("No LLM configured — add one in Settings");
@@ -834,10 +971,17 @@ listen("chat-tool-done", (event) => {
 // Opened through the opener plugin, never as a link: a bare href inside a
 // webview navigates the app's own window away from itself.
 chatMessagesEl.addEventListener("click", (event) => {
-  const button = event.target.closest(".chat-source");
-  if (!button) return;
-  const url = button.dataset.url;
-  if (url) invoke("open_in_browser", { url }).catch((err) => showToast(String(err)));
+  const source = event.target.closest(".chat-source");
+  if (source?.dataset.url) {
+    invoke("open_in_browser", { url: source.dataset.url }).catch((err) => showToast(String(err)));
+    return;
+  }
+  // A generated picture: the button reveals the file, clicking the picture
+  // itself opens it full size in the system viewer.
+  const reveal = event.target.closest(".chat-generated-open");
+  const picture = event.target.closest(".chat-generated img");
+  const path = reveal?.dataset.path || picture?.dataset.path;
+  if (path) invoke("open_generated_image", { path }).catch((err) => showToast(String(err)));
 });
 
 listen("chat-stream-error", (event) => {
@@ -868,6 +1012,7 @@ el("chatAttachments").addEventListener("click", (event) => {
   if (!button) return;
   pendingAttachments.splice(Number(button.dataset.index), 1);
   renderPendingAttachments();
+  refreshVisionWarning();
 });
 el("newChatBtn").addEventListener("click", newChat);
 el("chatDeleteBtn").addEventListener("click", () => {

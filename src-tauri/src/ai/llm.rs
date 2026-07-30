@@ -540,6 +540,85 @@ fn ollama_native_chat(
     Some(result)
 }
 
+/// What a model turned out to be able to do, as far as its server will say.
+///
+/// `known` is the important field. Only Ollama reports this (through its native
+/// /api/show), so against any other OpenAI-compatible server the answer is
+/// "no idea" — and a warning shown on a setup that actually works is worse than
+/// no warning at all, because the user learns to ignore it.
+#[derive(Serialize, Clone, Copy, Default)]
+pub struct ModelCapabilities {
+    pub vision: bool,
+    pub tools: bool,
+    pub known: bool,
+}
+
+static MODEL_CAPABILITIES: OnceLock<Mutex<HashMap<String, ModelCapabilities>>> = OnceLock::new();
+
+fn model_capabilities_cache() -> &'static Mutex<HashMap<String, ModelCapabilities>> {
+    MODEL_CAPABILITIES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Asks the server what a model can do. Cached per server+model per app run:
+/// the answer only changes if the user re-pulls the model, and the chat UI asks
+/// every time an image is attached.
+#[tauri::command]
+pub async fn get_model_capabilities(
+    base_url: String,
+    model: String,
+    api_key: String,
+) -> ModelCapabilities {
+    crate::offload(move || {
+        let key = quirks_key(&base_url, &model);
+        if let Some(cached) = model_capabilities_cache().lock().ok().and_then(|c| c.get(&key).copied())
+        {
+            return cached;
+        }
+        let found = ask_ollama_capabilities(&base_url, &model, &api_key).unwrap_or_default();
+        if let Ok(mut cache) = model_capabilities_cache().lock() {
+            cache.insert(key, found);
+        }
+        found
+    })
+    .await
+}
+
+fn ask_ollama_capabilities(base_url: &str, model: &str, api_key: &str) -> Option<ModelCapabilities> {
+    if ollama_native_known_missing(base_url) {
+        return None;
+    }
+    let root = base_url.trim_end_matches('/').strip_suffix("/v1")?;
+    let mut request = reqwest::blocking::Client::new()
+        .post(format!("{root}/api/show"))
+        .timeout(std::time::Duration::from_secs(8))
+        .json(&json!({ "model": model }));
+    if !api_key.trim().is_empty() {
+        request = request.bearer_auth(api_key);
+    }
+    let response = request.send().ok()?;
+    if !response.status().is_success() {
+        return None;
+    }
+    let body: serde_json::Value = response.json().ok()?;
+    capabilities_from_show(&body)
+}
+
+/// Reads the `capabilities` list out of an /api/show response.
+///
+/// Returns None rather than an all-false result when the field is missing: an
+/// older server that does not report capabilities at all must come out as
+/// "unknown", not as "this model can do nothing" — the second would put a
+/// wrong warning in front of a model that works.
+fn capabilities_from_show(body: &serde_json::Value) -> Option<ModelCapabilities> {
+    let listed = body.get("capabilities")?.as_array()?;
+    let has = |name: &str| listed.iter().any(|c| c.as_str() == Some(name));
+    Some(ModelCapabilities {
+        vision: has("vision"),
+        tools: has("tools"),
+        known: true,
+    })
+}
+
 #[derive(Deserialize, Clone)]
 pub struct ChatTurn {
     pub role: String,
@@ -958,6 +1037,32 @@ fn truncate(text: &str, max_len: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // The exact list a live Ollama returned for the model this app ships
+    // against, and for one that has no vision.
+    #[test]
+    fn capabilities_are_read_from_what_the_server_listed() {
+        let seeing = json!({"capabilities": ["completion", "vision", "tools", "thinking"]});
+        let caps = capabilities_from_show(&seeing).expect("should have parsed");
+        assert!(caps.vision);
+        assert!(caps.tools);
+        assert!(caps.known);
+
+        let blind = json!({"capabilities": ["completion"]});
+        let caps = capabilities_from_show(&blind).expect("should have parsed");
+        assert!(!caps.vision);
+        assert!(!caps.tools);
+        assert!(caps.known);
+    }
+
+    // The distinction the warning depends on: a server that says nothing must
+    // not read as "cannot do anything", or every model behind a non-Ollama
+    // endpoint gets warned about.
+    #[test]
+    fn a_server_that_reports_nothing_stays_unknown() {
+        assert!(capabilities_from_show(&json!({"model": "x"})).is_none());
+        assert!(capabilities_from_show(&json!({"capabilities": "not a list"})).is_none());
+    }
 
     fn build(q: &ModelQuirks, max_tokens: Option<u32>, think: bool) -> serde_json::Value {
         let mut payload = json!({"model": "m"});

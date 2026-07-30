@@ -800,3 +800,63 @@
      up as misplaced chips rather than a broken layout. */
   justify-content: flex-end;
 }
+
+/* Shown above the attachment cards when the selected model cannot read images
+   (chat.js's refreshVisionWarning). Only appears when the server positively
+   said so — never on a guess, because a warning that fires on a working setup
+   is one the user learns to scroll past.
+
+   flex-basis: 100% because the container is a wrapping flex row of cards; the
+   warning has to take its own line rather than sit beside the first card. */
+.chat-attachment-warning {
+  flex-basis: 100%;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--danger);
+  background: var(--danger-soft);
+  border-radius: 8px;
+  padding: 6px 9px;
+}
+
+/* A picture made by /image (chat.js's generatedImageHtml). Sits below the
+   bubble like the source chips: it is the answer itself, but it is not text, so
+   it does not belong inside a text bubble. */
+.chat-generated {
+  margin: 6px 0 0 2px;
+  max-width: 420px;
+}
+.chat-generated img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  cursor: zoom-in;
+}
+.chat-generated.loading {
+  font-size: 11px;
+  color: var(--text-faint);
+  font-family: var(--mono);
+  padding: 10px 0;
+}
+.chat-generated-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  font-size: 11px;
+  color: #777;
+  font-family: var(--mono);
+}
+.chat-generated-open {
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--text-dim);
+  font-size: 11px;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.chat-generated-open:hover {
+  color: var(--accent);
+}

@@ -23,9 +23,10 @@ use ai::chat::{
     choose_chats_dir, delete_chat, get_chat_instructions, get_chats_dir, list_chats, load_chat,
     pick_chat_attachment, record_voice_turn, reset_chats_dir, save_chat, save_chat_instructions,
 };
+use ai::images::{generate_image, open_generated_image, read_generated_image};
 use ai::llm::{
-    get_llm_settings, save_llm_settings, send_chat_message, set_active_llm_profile, start_server_now,
-    test_llm_connection,
+    get_llm_settings, get_model_capabilities, save_llm_settings, send_chat_message,
+    set_active_llm_profile, start_server_now, test_llm_connection,
 };
 use ai::recall::{recall_context, recall_reindex, recall_status, search_chats};
 use ai::speech::{get_stt_settings, get_tts_settings, save_stt_settings, save_tts_settings};
@@ -116,6 +117,10 @@ pub fn run() {
             open_workspace,
             hide_workspace,
             get_llm_settings,
+            get_model_capabilities,
+            generate_image,
+            read_generated_image,
+            open_generated_image,
             save_llm_settings,
             set_active_llm_profile,
             send_chat_message,
@@ -225,6 +230,7 @@ pub fn run() {
                 ai::llm::maybe_autostart(&app_handle);
                 ai::speech::maybe_autostart_stt(&app_handle);
                 ai::speech::maybe_autostart_tts(&app_handle);
+                ai::images::maybe_autostart(&app_handle);
             });
 
             github::start_merge_watcher(app.handle().clone());

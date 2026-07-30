@@ -56,6 +56,7 @@ pub fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
             "quit_stop_llm" => {
                 llm::stop_autostarted();
                 crate::ai::speech::stop_autostarted();
+                crate::ai::images::stop_autostarted();
                 app.exit(0);
             }
             _ => {}

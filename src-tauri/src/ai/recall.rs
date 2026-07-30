@@ -1889,6 +1889,8 @@ mod tests {
             ts,
             source: String::new(),
             attachments: Vec::new(),
+            image_path: String::new(),
+            image_meta: String::new(),
         }
     }
 

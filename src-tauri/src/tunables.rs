@@ -385,6 +385,59 @@ tunables! {
          else's server the moment you point a profile at a hosted API. Local \
          models are unaffected either way.";
 
+    // --- Images --------------------------------------------------------------
+    //
+    // The model itself is not a setting here: it is chosen when the server is
+    // started (sd-server's own -m argument, in the start command below). That is
+    // what keeps swapping SD 1.5 for SDXL or Flux a change of configuration
+    // rather than of code — every one of them answers the same request.
+    IMAGE_BASE_URL = "image.base_url", "Images",
+        "Image server address", "",
+        Kind::Text { default: "http://127.0.0.1:7801", placeholder: "http://127.0.0.1:7801" },
+        restart: false,
+        "Where a local image server is listening. It must speak the OpenAI images \
+         API (POST /v1/images/generations) — stable-diffusion.cpp's sd-server does, \
+         and needs no account or key. Only local addresses are accepted: what you \
+         ask it to draw is your own words, and this app does not send those to \
+         somebody else's machine.";
+
+    IMAGE_START_COMMAND = "image.start_command", "Images",
+        "Start command", "",
+        Kind::Text { default: "", placeholder: "C:\\sd\\sd-server.exe -m C:\\sd\\model.safetensors --listen-port 7801 --diffusion-fa --vae-tiling" },
+        restart: false,
+        "Run at startup if nothing is already listening at the address above. \
+         The two flags in the example are not optional on an AMD card: measured on \
+         this machine, without --diffusion-fa a 768x768 image exceeded the Vulkan \
+         driver's 2 GB single-allocation limit and fell back to roughly CPU speed \
+         (300s and still unfinished, against 5.7s with it).";
+
+    IMAGE_SIZE = "image.size", "Images",
+        "Default image size", "px",
+        Kind::Int { min: 256, max: 2048, default: 512 },
+        restart: false,
+        "Width and height of a generated picture. Match this to the model the \
+         server loaded: SD 1.5 was trained at 512 and goes soft above it, SDXL was \
+         trained at 1024 and is wasted below it. Bigger costs time — measured with \
+         SD 1.5 here: 512 in 3.9s, 768 in 5.7s, 1024 in 10.5s.";
+
+    IMAGE_STEPS = "image.steps", "Images",
+        "Denoising steps", "",
+        Kind::Int { min: 1, max: 100, default: 24 },
+        restart: false,
+        "How many passes the model refines the picture over. More is slower and \
+         better only up to a point — around 20-30 for most models, and as few as 4 \
+         for the 'turbo' and 'schnell' variants, which will look burnt at 24.";
+
+    IMAGE_NEGATIVE_PROMPT = "image.negative_prompt", "Images",
+        "Always avoid", "",
+        Kind::Text { default: "blurry, low detail, deformed, extra limbs, watermark, text", placeholder: "blurry, watermark" },
+        restart: false,
+        "Added to every picture as things not to draw. This matters more than it \
+         sounds: measured on the same model and the same seed, adding a negative \
+         prompt and a more specific description was the difference between a flat, \
+         soft image and a sharp one — a bigger difference than any other setting \
+         on this page.";
+
     // --- Web -----------------------------------------------------------------
     WEB_TOOLS_ENABLED = "web.tools_enabled", "Web",
         "Let the model read web pages and search", "",

@@ -55,6 +55,19 @@ pub struct ChatMessage {
     // rather than per-chat because it is a property of the individual turn.
     #[serde(default)]
     pub source: String,
+    /// A picture this turn produced (ai/images.rs), stored as the path it was
+    /// written to rather than as its bytes.
+    ///
+    /// The bytes deliberately do not go in here: attachments already drop image
+    /// data for exactly this reason, and a conversation with a dozen pictures
+    /// inlined as base64 would be several megabytes of JSON to open. The file
+    /// outlives the app, so the path is enough to show it again.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub image_path: String,
+    /// Size and how long it took, shown under the picture. Recorded at
+    /// generation time because it cannot be recovered from the file later.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub image_meta: String,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -388,8 +401,11 @@ pub fn record_voice_turn(app: tauri::AppHandle, transcript: String, reply: Strin
         content: transcript,
         ts,
         source: "voice".to_string(),
-        // A spoken turn has no files attached to it.
+        // A spoken turn has no files attached to it, and no picture: image
+        // generation is a typed command in the chat window.
         attachments: Vec::new(),
+        image_path: String::new(),
+        image_meta: String::new(),
     });
     chat.messages.push(ChatMessage {
         role: "assistant".to_string(),
@@ -397,6 +413,8 @@ pub fn record_voice_turn(app: tauri::AppHandle, transcript: String, reply: Strin
         ts,
         source: "voice".to_string(),
         attachments: Vec::new(),
+        image_path: String::new(),
+        image_meta: String::new(),
     });
 
     let saved = save_chat(app.clone(), chat);

@@ -11,6 +11,7 @@
 // registry of callable tools and the wire handling for a call. The loop that
 // drives them lives in llm.rs, next to the streaming it interleaves with.
 pub mod chat;
+pub mod images;
 pub mod llm;
 pub mod process;
 pub mod recall;
