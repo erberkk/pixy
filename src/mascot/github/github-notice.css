@@ -28,7 +28,7 @@
   font-family: -apple-system, "Segoe UI", sans-serif;
   font-size: 14px;
   font-weight: 600;
-  text-align: center;
+  text-align: left;
   cursor: pointer;
   overflow-y: auto;
   /* `max-height: 100%` doesn't actually work here: percentage heights
@@ -40,10 +40,20 @@
   max-height: 220px;
 }
 
+/* The mascot pill is a two-column grid: the pip in column 1, this notice in
+   column 2 (see notice.css). Centring the icon+text inside that column put the
+   pair in the middle of whatever width was left, so the gap between the pip and
+   the icon was several times the gap between the icon and the text — and it
+   moved every time the text length changed. Left-aligned, the three read as one
+   row with the same 8px rhythm throughout, whatever the message says.
+
+   align-items: center rather than flex-start so the icon sits level with the
+   text instead of riding at the top the moment a title wraps to two lines,
+   which is the common case for a PR title. */
 .merge-notice {
   display: flex;
-  align-items: flex-start;
-  justify-content: center;
+  align-items: center;
+  justify-content: flex-start;
   gap: 8px;
   width: 100%;
   padding: 4px 14px;
@@ -62,7 +72,7 @@
 .issue-notice-text {
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: flex-start;
   gap: 3px;
   min-width: 0;
 }
