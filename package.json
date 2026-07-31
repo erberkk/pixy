@@ -1,10 +1,11 @@
 {
-  "name": "tauri-app",
+  "name": "pixy",
   "private": true,
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "test": "node --test \"src/**/*.test.js\""
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2"

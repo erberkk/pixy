@@ -234,15 +234,125 @@ pub fn config_path(app: &tauri::AppHandle) -> PathBuf {
     dir.join("config.json")
 }
 
+/// Parses the config file's text.
+///
+/// Separate from the file handling so the two ways this has actually gone wrong
+/// can be tested without an AppHandle.
+///
+/// The BOM strip is not defensive programming for its own sake: writing this
+/// file from PowerShell with `-Encoding utf8` produces a UTF-8 BOM, serde_json
+/// rejects the leading `EF BB BF` as unexpected input, and the app then started
+/// with a completely default config while a perfectly good 31-key file sat on
+/// disk. A BOM carries no meaning for UTF-8, so accepting one costs nothing and
+/// removes a way to lose every setting by editing the file with the wrong tool.
+fn parse_config(text: &str) -> Result<AppConfig, serde_json::Error> {
+    serde_json::from_str(text.trim_start_matches('\u{feff}'))
+}
+
+/// Moves a config file that cannot be parsed out of the way, keeping it.
+///
+/// This is the difference between a recoverable problem and a silent wipe.
+/// `read_config` has to return something, and the only thing it can return is a
+/// default — after which the next `write_config` would persist those defaults
+/// over the file, taking every LLM profile, API key and connected Google
+/// account with it. Renaming first means the bytes survive somewhere the user
+/// can find them, and the name says what happened.
+fn preserve_unreadable(path: &PathBuf) -> Option<PathBuf> {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let kept = path.with_extension(format!("json.corrupt-{stamp}"));
+    fs::rename(path, &kept).ok().map(|_| kept)
+}
+
 pub fn read_config(app: &tauri::AppHandle) -> AppConfig {
-    fs::read_to_string(config_path(app))
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default()
+    let path = config_path(app);
+    let Ok(text) = fs::read_to_string(&path) else {
+        // No file yet is the ordinary first-run case, not a failure.
+        return AppConfig::default();
+    };
+    match parse_config(&text) {
+        Ok(cfg) => cfg,
+        Err(error) => {
+            // Loud on the way past, because the symptom on its own ("all my
+            // settings are gone") points at everything except the config file.
+            match preserve_unreadable(&path) {
+                Some(kept) => eprintln!(
+                    "config.json could not be parsed ({error}) — kept the original at {} and starting from defaults",
+                    kept.display()
+                ),
+                None => eprintln!(
+                    "config.json could not be parsed ({error}) and could not be moved aside — starting from defaults, NOT overwriting it"
+                ),
+            }
+            AppConfig::default()
+        }
+    }
 }
 
 pub fn write_config(app: &tauri::AppHandle, cfg: &AppConfig) {
-    if let Ok(json) = serde_json::to_string_pretty(cfg) {
-        let _ = fs::write(config_path(app), json);
+    let Ok(json) = serde_json::to_string_pretty(cfg) else {
+        return;
+    };
+    let path = config_path(app);
+    // Write beside the target and rename over it, rather than writing in place.
+    // `fs::write` truncates first, so a crash, a power cut or a full disk
+    // between truncate and write leaves a half-written config.json — and the
+    // reader above cannot tell that apart from a file that was never valid.
+    // A rename is atomic on one volume on Windows and POSIX alike, so the file
+    // is either the old config or the new one and never something in between.
+    let tmp = path.with_extension("json.tmp");
+    if let Err(error) = fs::write(&tmp, &json) {
+        eprintln!("could not write {}: {error}", tmp.display());
+        return;
+    }
+    if let Err(error) = fs::rename(&tmp, &path) {
+        eprintln!("could not replace {}: {error}", path.display());
+        let _ = fs::remove_file(&tmp);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_utf8_bom_does_not_lose_the_config() {
+        let json = r#"{"github_token":"t"}"#;
+        let with_bom = format!("\u{feff}{json}");
+        // The bug this guards: serde_json alone rejects the BOM outright.
+        assert!(serde_json::from_str::<AppConfig>(&with_bom).is_err());
+        assert_eq!(
+            parse_config(&with_bom).unwrap().github_token.as_deref(),
+            Some("t")
+        );
+    }
+
+    #[test]
+    fn an_ordinary_file_still_parses() {
+        assert_eq!(
+            parse_config(r#"{"github_token":"t"}"#).unwrap().github_token.as_deref(),
+            Some("t")
+        );
+    }
+
+    /// Unknown and missing keys must both be tolerated: every field carries
+    /// `#[serde(default)]` precisely so an older file keeps working, and a
+    /// version that adds a field must not orphan everyone's settings.
+    #[test]
+    fn missing_and_unknown_keys_are_tolerated() {
+        let cfg = parse_config(r#"{"something_from_a_later_version":1}"#).unwrap();
+        assert!(cfg.github_token.is_none());
+        assert!(parse_config("{}").is_ok());
+    }
+
+    /// The truncated-write case from a crash mid-save. It has to be an error
+    /// rather than an empty config, because an error is what triggers keeping
+    /// the file instead of overwriting it.
+    #[test]
+    fn a_truncated_or_empty_file_is_an_error_not_an_empty_config() {
+        assert!(parse_config("").is_err());
+        assert!(parse_config(r#"{"github_token":"t"#).is_err());
     }
 }

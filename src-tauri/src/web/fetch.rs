@@ -3,11 +3,12 @@
 // The hard part here is not the HTTP. It is that the address being fetched was
 // chosen by a language model, which in turn was reading a web page that anyone
 // could have written — so "fetch this URL" has to be treated as an instruction
-// from a stranger. That is what `is_public_url` below is for, and why it runs
-// again on every redirect hop.
+// from a stranger. That is what `validated_host` below is for, and why it runs
+// again on every redirect hop — and why what it hands back is pinned onto the
+// client, so the address that was approved is the address that gets connected to.
 
 use std::io::Read;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, ToSocketAddrs};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs};
 
 /// Hard ceiling on how much of one page is read.
 ///
@@ -41,7 +42,8 @@ pub struct FetchedPage {
     pub truncated: bool,
 }
 
-/// Whether an address is somewhere on the public internet.
+/// Whether a URL points somewhere on the public internet, and if so, exactly
+/// where — the host plus the addresses approved for it.
 ///
 /// This is a security boundary, not a convenience check, and it errs toward
 /// refusing: anything that cannot be confidently placed on the public internet
@@ -51,12 +53,23 @@ pub struct FetchedPage {
 /// 8090/8091, and the widget's own event server, none of which expect a
 /// request from a web page.
 ///
+/// It returns the addresses rather than a bare yes/no because validating and
+/// connecting are two separate lookups, and between them a resolver is free to
+/// change its mind: answer with a public address for the check, then 127.0.0.1
+/// when the socket is actually opened. No amount of checking here can catch
+/// that, because by then the checks have already passed — the only fix is to
+/// stop the second lookup happening, by handing the approved addresses to the
+/// client and telling it not to resolve again.
+///
+/// `None` means there is nothing to pin: the URL named a literal address, so no
+/// resolution happens on either side of the check.
+///
 /// Note that `ai::recall::is_local_endpoint` answers a similar-looking question
 /// and is deliberately NOT reused: it classifies a URL the *user* typed into
 /// settings, so it never resolves DNS. Here the hostname is attacker-chosen,
 /// and a name that resolves to 127.0.0.1 is the obvious way past a check that
 /// only looks at the text of the host.
-pub fn is_public_url(url: &str) -> Result<(), String> {
+fn validated_host(url: &str) -> Result<Option<(String, Vec<SocketAddr>)>, String> {
     let parsed = reqwest::Url::parse(url).map_err(|_| format!("Not a usable URL: {url}"))?;
     match parsed.scheme() {
         "http" | "https" => {}
@@ -71,7 +84,7 @@ pub fn is_public_url(url: &str) -> Result<(), String> {
     // already.
     if let Ok(ip) = host.trim_matches(['[', ']']).parse::<IpAddr>() {
         return if is_public_ip(&ip) {
-            Ok(())
+            Ok(None)
         } else {
             Err(format!("Refusing to fetch a non-public address ({ip})."))
         };
@@ -84,20 +97,47 @@ pub fn is_public_url(url: &str) -> Result<(), String> {
     let resolved = (host, port)
         .to_socket_addrs()
         .map_err(|e| format!("Could not resolve {host}: {e}"))?;
-    let mut any = false;
+    let mut approved = Vec::new();
     for address in resolved {
-        any = true;
         if !is_public_ip(&address.ip()) {
             return Err(format!(
                 "Refusing to fetch {host}: it resolves to the non-public address {}.",
                 address.ip()
             ));
         }
+        approved.push(address);
     }
-    if !any {
+    if approved.is_empty() {
         return Err(format!("{host} resolved to no addresses."));
     }
-    Ok(())
+    Ok(Some((host.to_string(), approved)))
+}
+
+/// A client that will only connect to addresses this module already approved.
+///
+/// Built per redirect hop rather than once for the whole chain, because each hop
+/// can be a different host and the pin has to name the host it applies to. A
+/// client is cheap next to the request it is about to make.
+///
+/// The pin replaces DNS, not TLS: reqwest still uses the hostname for SNI and
+/// certificate verification, so a pinned request to a public site is exactly as
+/// authenticated as an unpinned one.
+fn pinned_client(
+    pin: Option<&(String, Vec<SocketAddr>)>,
+) -> Result<reqwest::blocking::Client, String> {
+    let mut builder = reqwest::blocking::Client::builder()
+        // Followed by hand below so each hop can be re-validated. reqwest's own
+        // policy would happily follow a 302 into 127.0.0.1 having only ever
+        // checked the address that was asked for.
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(std::time::Duration::from_secs(FETCH_TIMEOUT_SECS))
+        .user_agent(USER_AGENT);
+    if let Some((host, addresses)) = pin {
+        builder = builder.resolve_to_addrs(host, addresses);
+    }
+    builder
+        .build()
+        .map_err(|e| format!("Could not start the request: {e}"))
 }
 
 fn is_public_ip(ip: &IpAddr) -> bool {
@@ -141,21 +181,17 @@ fn is_public_v6(ip: &Ipv6Addr) -> bool {
 /// read up to the byte cap either way, and cutting the text afterwards keeps
 /// the extraction working on a complete document.
 pub fn fetch_text(url: &str, max_chars: usize) -> Result<FetchedPage, String> {
-    is_public_url(url)?;
-
-    let client = reqwest::blocking::Client::builder()
-        // Followed by hand below so each hop can be re-validated. reqwest's own
-        // policy would happily follow a 302 into 127.0.0.1 having only ever
-        // checked the address that was asked for.
-        .redirect(reqwest::redirect::Policy::none())
-        .timeout(std::time::Duration::from_secs(FETCH_TIMEOUT_SECS))
-        .user_agent(USER_AGENT)
-        .build()
-        .map_err(|e| format!("Could not start the request: {e}"))?;
+    // Held across the loop and replaced on every hop, so the client used for a
+    // request is always pinned to the addresses that hop's own check approved.
+    // Safe to rebuild per iteration: a blocking Response keeps reqwest's core
+    // thread alive on its own account, so the body outlives the client that
+    // fetched it.
+    let mut pin = validated_host(url)?;
 
     let mut current = url.to_string();
     let mut response = None;
     for _ in 0..=MAX_REDIRECTS {
+        let client = pinned_client(pin.as_ref())?;
         let attempt = client
             .get(&current)
             .header("Accept", "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.8")
@@ -178,7 +214,7 @@ pub fn fetch_text(url: &str, max_chars: usize) -> Result<FetchedPage, String> {
                 .and_then(|base| base.join(&location))
                 .map_err(|_| format!("{current} redirected somewhere unusable: {location}"))?;
             current = next.to_string();
-            is_public_url(&current)?;
+            pin = validated_host(&current)?;
             continue;
         }
 
@@ -264,7 +300,7 @@ mod tests {
             "http://100.64.0.1/",                // carrier-grade NAT
         ] {
             assert!(
-                is_public_url(url).is_err(),
+                validated_host(url).is_err(),
                 "should have refused {url}"
             );
         }
@@ -273,18 +309,53 @@ mod tests {
     #[test]
     fn non_http_schemes_are_refused() {
         for url in [
-            "file:///C:/Users/erber/.ssh/id_rsa",
+            "file:///C:/Users/alice/.ssh/id_rsa",
             "ftp://example.com/",
             "data:text/html,<script>alert(1)</script>",
         ] {
-            assert!(is_public_url(url).is_err(), "should have refused {url}");
+            assert!(validated_host(url).is_err(), "should have refused {url}");
         }
     }
 
     #[test]
     fn a_public_literal_address_is_allowed() {
-        assert!(is_public_url("https://1.1.1.1/").is_ok());
-        assert!(is_public_url("https://[2606:4700:4700::1111]/").is_ok());
+        assert!(validated_host("https://1.1.1.1/").is_ok());
+        assert!(validated_host("https://[2606:4700:4700::1111]/").is_ok());
+    }
+
+    /// A literal address must NOT produce a pin, and the distinction matters:
+    /// pinning works by overriding DNS for a named host, so handing reqwest a
+    /// "host" that is really an address would override nothing while looking
+    /// like protection. There is also nothing to protect — an address cannot be
+    /// re-resolved into a different one.
+    #[test]
+    fn a_literal_address_needs_no_pin() {
+        assert_eq!(validated_host("https://1.1.1.1/").unwrap(), None);
+        assert_eq!(
+            validated_host("https://[2606:4700:4700::1111]/").unwrap(),
+            None
+        );
+    }
+
+    /// The pin's contents, checked against a name that resolves on every machine
+    /// without a network: every address handed to the client must be one the
+    /// check approved, and the host must be the name — not the address — because
+    /// that is the key reqwest matches on and what TLS still verifies against.
+    #[test]
+    fn a_hostname_is_pinned_to_the_addresses_that_were_checked() {
+        // Refused for being loopback, so the pin is observed on the way to the
+        // rejection rather than by trusting a public name to resolve offline.
+        assert!(validated_host("http://localhost/").is_err());
+
+        // A name whose resolution is under this test's control: the loopback
+        // check above proves rejection, and this proves the shape of acceptance.
+        let Ok(Some((host, addresses))) = validated_host("https://one.one.one.one/") else {
+            // No DNS in this environment — the assertions above still ran.
+            return;
+        };
+        assert_eq!(host, "one.one.one.one");
+        assert!(!addresses.is_empty());
+        assert!(addresses.iter().all(|a| is_public_ip(&a.ip())));
     }
 
     // The check must survive a hostname, not only a literal — this is the
@@ -293,13 +364,13 @@ mod tests {
     fn a_hostname_that_resolves_to_loopback_is_refused() {
         // localhost is the case that exists on every machine without needing a
         // hostile DNS server to demonstrate it.
-        assert!(is_public_url("http://localhost/").is_err());
+        assert!(validated_host("http://localhost/").is_err());
     }
 
     #[test]
     fn a_url_with_no_host_is_refused() {
-        assert!(is_public_url("http:///nowhere").is_err());
-        assert!(is_public_url("not a url at all").is_err());
+        assert!(validated_host("http:///nowhere").is_err());
+        assert!(validated_host("not a url at all").is_err());
     }
 
     /// Against the real internet, so excluded from the normal run — a suite

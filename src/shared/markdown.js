@@ -4,6 +4,15 @@
 // fenced code. Used by the notes preview, memory bodies and chat messages.
 
 export function escapeHtml(str) {
+  // No DOM: the test runner imports this module directly under Node, and this
+  // renderer is the one piece of frontend that has to be tested rather than
+  // eyeballed (see markdown.test.js). The two paths agree on everything that
+  // matters — setting textContent and reading innerHTML back escapes exactly
+  // & < > — with one cosmetic difference: the DOM path also serialises U+00A0
+  // as &nbsp;. Nothing downstream distinguishes them.
+  if (typeof document === "undefined") {
+    return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
   const d = document.createElement("div");
   d.textContent = str;
   return d.innerHTML;
@@ -22,10 +31,34 @@ export function escapeAttr(str) {
   return escapeHtml(str).replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
+// Schemes this renderer is willing to emit as a link. Everything else — most
+// importantly `javascript:` — is left as literal text.
+//
+// A link in a model's reply is attacker-influenced input, not authored content:
+// the model reads pages that anyone can write (see web/fetch.rs), so a URL
+// arriving in an answer carries exactly the trust level of a URL in a search
+// result, which is none. Allow-list rather than deny-list, because the set of
+// schemes a webview will execute is not something this file can enumerate.
+const SAFE_HREF = /^(?:https?:\/\/|mailto:|#|\/)/i;
+
 export function inlineMd(text) {
   text = escapeHtml(text);
   text = text.replace(/\[\[([^\]]+)\]\]/g, (m, p1) => '<a class="wiki-link" data-note="' + p1.replace(/"/g, "&quot;") + '">' + p1 + "</a>");
-  text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a class="ext-link" href="$2" target="_blank" rel="noopener">$1</a>');
+  // The href goes into a quoted attribute, so quotes must die here even though
+  // escapeHtml already ran: escapeHtml leaves them alone by design (a quote in
+  // text position needs no escaping) and one of them ends the attribute, after
+  // which the rest of the URL is parsed as markup — `" autofocus onfocus="…`
+  // needs no click to fire. escapeAttr is deliberately NOT reused: escapeHtml
+  // has already turned the & of a query string into &amp;, and running it twice
+  // would corrupt the link.
+  text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (whole, label, href) => {
+    const url = href.trim();
+    // Not a scheme we emit: show the markdown source rather than a link whose
+    // destination the reader has no way to judge.
+    if (!SAFE_HREF.test(url)) return whole;
+    const safe = url.replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+    return '<a class="ext-link" href="' + safe + '" target="_blank" rel="noopener noreferrer">' + label + "</a>";
+  });
   text = text.replace(/`([^`]+)`/g, "<code>$1</code>");
   text = text.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
   text = text.replace(/\*([^*]+)\*/g, "<em>$1</em>");
@@ -104,7 +137,14 @@ function codeBlockHtml(code, langToken) {
 /// the real Windows clipboard, which kept its previous contents while the button
 /// reported success. The Rust side has no such condition.
 export async function copyText(text) {
-  await window.__TAURI__.core.invoke("plugin:clipboard-manager|write_text", { label: null, text });
+  // Imported here rather than at the top of the file, and this is the one place
+  // in the frontend where that matters: shared/tauri.js reads Tauri's injected
+  // globals at module scope, so importing it eagerly would make this module
+  // unloadable anywhere `window.__TAURI__` does not exist — including the test
+  // runner, which is the only reason the renderer below has any test coverage
+  // at all. A click is not a hot path, so the deferred import costs nothing.
+  const { invoke } = await import("./tauri.js");
+  await invoke("plugin:clipboard-manager|write_text", { label: null, text });
 }
 
 /// Wires a button to copy `getText()`, with the button reporting what happened.

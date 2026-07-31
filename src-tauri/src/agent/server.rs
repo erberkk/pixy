@@ -22,7 +22,7 @@ fn handle_event_request(mut request: tiny_http::Request, app_handle: &tauri::App
             // hook table) actually means "a tool is running right now" —
             // Notification (waiting_input) and Stop (turn_done) mean the
             // opposite (Claude is waiting on the human, or just finished),
-            // so only this one should feed the pip ambient system's
+            // so only this one should feed the pixy ambient system's
             // "coding" mood (signals.js) — treating every hook alike
             // previously left "coding" showing for a while right after a
             // Stop/Notification, which is backwards.
@@ -30,7 +30,7 @@ fn handle_event_request(mut request: tiny_http::Request, app_handle: &tauri::App
                 let _ = app_handle.emit("claude-hook-activity", ());
                 let _ = app_handle.emit("mascot-state", "idle");
             }
-            // UserPromptSubmit — purely an ambient/pip-mood signal
+            // UserPromptSubmit — purely an ambient/pixy-mood signal
             // (signals.js's "thinking"), never forwarded as "mascot-state":
             // that event feeds main.js's body.className notice/card system,
             // and a prompt being submitted has nothing to do with that
@@ -190,7 +190,7 @@ pub fn resolve_decision(request_id: &str, behavior: &str, updated_input: Option<
 
 /// How many permission requests are waiting, and how long the oldest has been.
 ///
-/// This is what drives the mascot's "waiting"/"forgotten" poses (pip/signals.js).
+/// This is what drives the mascot's "waiting"/"forgotten" poses (pixy/signals.js).
 /// It used to be derived from a flag on one of this app's own pooled terminal
 /// sessions, keyed by WIDGET_TERMINAL_LABEL — which meant it only ever fired for
 /// Claude running *inside* the widget. Reading the registry instead makes it work
@@ -276,6 +276,33 @@ pub fn get_event_server_status() -> EventServerStatus {
     }
 }
 
+/// Whether a request came from a web page rather than from a hook.
+///
+/// This server binds loopback, which is often mistaken for a boundary. It is
+/// not: any page open in any browser can POST to `127.0.0.1` cross-origin. The
+/// response is unreadable to the page under CORS, but these endpoints are
+/// side-effect endpoints — `/decide` puts a permission card on screen that is
+/// indistinguishable from a real one, which is a phishing primitive, and `/`
+/// drives mascot state.
+///
+/// Browsers announce themselves whether they mean to or not. `Origin` is
+/// mandatory on a cross-origin POST, and every modern browser attaches
+/// `Sec-Fetch-*` to *every* request it makes, same-origin included — and neither
+/// can be set by page script, because both are forbidden header names. A hook
+/// invocation from Claude Code or `curl` sends neither, so their presence is a
+/// reliable signal without asking the user to reconfigure anything.
+///
+/// What this is not: authentication. It stops a browser, not another program
+/// running as the same user. A shared token in the hook URL would cover that
+/// too, at the cost of invalidating every existing hook configuration — worth
+/// doing, deliberately not bundled into this change. See SECURITY.md.
+fn is_browser_request(headers: &[tiny_http::Header]) -> bool {
+    headers.iter().any(|header| {
+        let name = header.field.as_str().as_str().to_ascii_lowercase();
+        name == "origin" || name.starts_with("sec-fetch-")
+    })
+}
+
 pub fn start_event_server(app_handle: tauri::AppHandle) {
     // Read once, here: the port is what the socket is bound to, so a change only
     // takes effect on the next launch — which is why its schema entry is marked
@@ -301,6 +328,15 @@ pub fn start_event_server(app_handle: tauri::AppHandle) {
         for request in server.incoming_requests() {
             let app_handle = app_handle.clone();
             thread::spawn(move || {
+                if is_browser_request(request.headers()) {
+                    let _ = request.respond(
+                        tiny_http::Response::from_string(
+                            "This endpoint is for Claude Code hooks, not for web pages.\n",
+                        )
+                        .with_status_code(403),
+                    );
+                    return;
+                }
                 if request.url().starts_with("/decide") {
                     handle_decide_request(request, &app_handle);
                 } else {
@@ -309,4 +345,63 @@ pub fn start_event_server(app_handle: tauri::AppHandle) {
             });
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn headers(pairs: &[(&str, &str)]) -> Vec<tiny_http::Header> {
+        pairs
+            .iter()
+            .map(|(name, value)| {
+                tiny_http::Header::from_bytes(name.as_bytes(), value.as_bytes())
+                    .expect("test header must be valid")
+            })
+            .collect()
+    }
+
+    /// What Claude Code and curl actually send. If this ever starts returning
+    /// true the hook integration is broken, and the symptom would be every hook
+    /// silently 403ing.
+    #[test]
+    fn a_hook_invocation_is_not_treated_as_a_browser() {
+        assert!(!is_browser_request(&headers(&[
+            ("Host", "127.0.0.1:7423"),
+            ("User-Agent", "curl/8.4.0"),
+            ("Content-Type", "application/json"),
+            ("Accept", "*/*"),
+        ])));
+        // No headers at all is a legal HTTP/1.0 request.
+        assert!(!is_browser_request(&headers(&[])));
+    }
+
+    #[test]
+    fn a_cross_origin_post_from_a_page_is_recognised() {
+        assert!(is_browser_request(&headers(&[
+            ("Host", "127.0.0.1:7423"),
+            ("Origin", "https://evil.example"),
+            ("Content-Type", "text/plain"),
+        ])));
+    }
+
+    /// The same-origin case, which `Origin` alone would miss: a page served from
+    /// this very port sends no Origin on a same-origin POST, but still sends
+    /// Sec-Fetch-*.
+    #[test]
+    fn a_same_origin_browser_request_is_recognised_by_sec_fetch() {
+        assert!(is_browser_request(&headers(&[
+            ("Host", "127.0.0.1:7423"),
+            ("Sec-Fetch-Site", "same-origin"),
+            ("Sec-Fetch-Mode", "cors"),
+        ])));
+    }
+
+    /// Header names are case-insensitive on the wire, so the check must be too —
+    /// otherwise it is bypassed by sending `origin:` in lower case.
+    #[test]
+    fn the_check_does_not_depend_on_header_capitalisation() {
+        assert!(is_browser_request(&headers(&[("origin", "null")])));
+        assert!(is_browser_request(&headers(&[("SEC-FETCH-MODE", "no-cors")])));
+    }
 }
