@@ -899,7 +899,14 @@ function buildTunableRow(setting, value) {
     // field that happens to accept two values.
     input.type = "checkbox";
     input.checked = !!value;
-    const track = document.createElement("span");
+    // A LABEL, not a span. `.switch input` is sized to nothing and made
+    // transparent (settings.css) so the track and thumb can draw the control —
+    // which means the only thing that can carry a click to the checkbox is a
+    // label wrapping it. The hand-written switches in settings.html get that
+    // from the enclosing `<label class="switch-row">`; a generated tunable row
+    // has no such ancestor, so every toggle in the tunables sections was
+    // completely unclickable until this was a label.
+    const track = document.createElement("label");
     track.className = "switch";
     track.appendChild(input);
     track.insertAdjacentHTML("beforeend", '<span class="switch-track"><span class="switch-thumb"></span></span>');
