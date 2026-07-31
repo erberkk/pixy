@@ -1,12 +1,122 @@
-# Mascot Widget — Claude Code Hook Setup
+# Using Pixy
 
-The widget is a Dynamic-Island-style pill docked at the top-center of the
-screen. It listens for events on `http://127.0.0.1:47623/`. Wire your Claude
-Code hooks to POST to it so the mascot reacts when a session needs you.
+A guide to what Pixy can do and how to make it do it. Nothing here is required
+in order — the app runs with nothing configured, and each capability turns
+itself on when you set it up.
 
-Add this to your `~/.claude/settings.json` (global) or a project's
-`.claude/settings.json` (per-project). Merge it into any existing `hooks` key
-rather than replacing the whole file.
+For *why* things work the way they do — the measurements, the bugs, the rejected
+alternatives — see [docs/DESIGN-NOTES.md](docs/DESIGN-NOTES.md).
+
+**Contents**
+
+1. [First launch](#1-first-launch)
+2. [Chat with a local model](#2-chat-with-a-local-model) — everything else builds on this
+3. [Claude Code permission cards](#3-claude-code-permission-cards)
+4. [Voice](#4-voice)
+5. [Pictures](#5-pictures)
+6. [Gmail and Calendar](#6-gmail-and-calendar)
+7. [GitHub](#7-github)
+8. [Day to day](#8-day-to-day)
+9. [When something doesn't work](#9-when-something-doesnt-work)
+
+---
+
+## 1. First launch
+
+```sh
+npm install
+npm run tauri dev
+```
+
+A small pill appears at the top-centre of your screen. That is the mascot. It
+stays on top of other windows, ignores your clicks unless you are pointing at
+it, and shrinks back to a dot when it has nothing to say.
+
+**Everything is reached from the tray icon** (bottom-right, near the clock):
+
+| Menu item | What it does |
+|---|---|
+| Show / Hide mascot | Gets the pill out of the way without quitting |
+| Open Workspace | The main window: chat, notes, memory |
+| Open Settings | Where all configuration lives |
+| Open Terminal | A system terminal, for convenience |
+| Run GitHub Digest Now | Fires the daily digest immediately — useful for testing |
+| Run Morning Brief Now | Same, for the mail brief |
+| Quit and stop local servers | Quits **and** shuts down the model servers it started |
+
+That last one matters: Pixy can start a local model server for you, and a plain
+quit would leave several gigabytes of model resident. This item stops them.
+
+> **If you are developing:** the frontend is compiled into the binary. Editing a
+> `.js` or `.css` file does nothing until you rebuild.
+
+---
+
+## 2. Chat with a local model
+
+This is the foundation — mail summaries, voice replies and the web-search tool
+all use whatever model you configure here.
+
+**Settings → LLM.** Add a profile:
+
+| Field | What to put |
+|---|---|
+| Name | Anything — it labels the picker in the chat window |
+| Base URL | e.g. `http://127.0.0.1:11434/v1` for Ollama, `http://127.0.0.1:8080/v1` for llama.cpp |
+| Model | The model name the server reports |
+| API key | Only if your server wants one. Leave blank for local servers |
+
+Anything OpenAI-compatible works. Press **Test connection** — it tells you what
+it found rather than just going green.
+
+You can add several profiles and switch between them **mid-conversation** from
+the picker at the top of the chat. Useful when one model is good at code and
+another is fast.
+
+**Autostart.** If you give it a start command, Pixy launches the server when it
+starts and can stop it again on quit. Leave it empty if you run the server
+yourself.
+
+### What you can do in chat
+
+- **Attach documents** — PDF, DOCX, TXT, code files. Their text is extracted and
+  goes into the conversation.
+- **Attach or paste images.** Ctrl+V a screenshot straight into the composer. If
+  the model can't see images, Pixy says so instead of silently ignoring it. Click
+  a sent image to open it full size.
+- **Edit any message you sent** and re-run from there.
+- **Retry the last answer** without retyping.
+- **Stop a reply mid-stream** with the same button that sent it.
+- **Ask it to search the web** — it has a keyless search-and-read tool, and shows
+  the sources it used under the answer.
+- **`/image <prompt>`** — see [Pictures](#5-pictures).
+
+### Recall across conversations
+
+Pixy indexes every past chat and quietly pulls in relevant earlier exchanges
+when they help. When it does, the message says so — "Added from your earlier
+conversations" — so an answer never leans on context you can't see.
+
+Search history yourself from the workspace search box. **Settings → Memory**
+controls how eagerly recall fires, and whether recalled history may be sent to a
+non-local model (**off by default**).
+
+---
+
+## 3. Claude Code permission cards
+
+The original reason this app exists. Claude Code asks permission before running a
+tool; with hooks wired up, that question appears as a card on your mascot and
+your answer goes straight back to Claude Code. You never have to find the
+terminal window.
+
+`AskUserQuestion` shows up as tappable option chips instead of Approve/Deny.
+
+### Wiring it up
+
+Add this to `~/.claude/settings.json` (global) or a project's
+`.claude/settings.json`. **Merge it into any existing `hooks` key** rather than
+replacing the file.
 
 ```json
 {
@@ -17,289 +127,255 @@ rather than replacing the whole file.
         "hooks": [
           {
             "type": "command",
-            "command": "IN=$(cat); echo \"$IN\" | curl -s -X POST \"http://127.0.0.1:47623/decide?label=$WIDGET_TERMINAL_LABEL\" -H \"Content-Type: application/json\" -d @-",
+            "command": "IN=$(cat); echo \"$IN\" | curl -s -X POST \"http://127.0.0.1:47623/decide\" -H \"Content-Type: application/json\" -d @-",
             "timeout": 3600
           }
         ]
       }
     ],
     "PreToolUse": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "curl -s -X POST http://127.0.0.1:47623/event -H \"Content-Type: application/json\" -d \"{\\\"state\\\":\\\"idle\\\"}\"",
-            "timeout": 5
-          }
-        ]
-      }
+      { "matcher": "", "hooks": [ { "type": "command", "command": "curl -s -X POST http://127.0.0.1:47623/event -H \"Content-Type: application/json\" -d \"{\\\"state\\\":\\\"idle\\\"}\"", "timeout": 5 } ] }
     ],
     "PermissionDenied": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "curl -s -X POST http://127.0.0.1:47623/event -H \"Content-Type: application/json\" -d \"{\\\"state\\\":\\\"idle\\\"}\"",
-            "timeout": 5
-          }
-        ]
-      }
+      { "matcher": "", "hooks": [ { "type": "command", "command": "curl -s -X POST http://127.0.0.1:47623/event -H \"Content-Type: application/json\" -d \"{\\\"state\\\":\\\"idle\\\"}\"", "timeout": 5 } ] }
     ],
     "Notification": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "curl -s -X POST http://127.0.0.1:47623/event -H \"Content-Type: application/json\" -d \"{\\\"state\\\":\\\"waiting_input\\\"}\"",
-            "timeout": 5
-          }
-        ]
-      }
+      { "matcher": "", "hooks": [ { "type": "command", "command": "curl -s -X POST http://127.0.0.1:47623/event -H \"Content-Type: application/json\" -d \"{\\\"state\\\":\\\"waiting_input\\\"}\"", "timeout": 5 } ] }
     ],
     "Stop": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "curl -s -X POST http://127.0.0.1:47623/event -H \"Content-Type: application/json\" -d \"{\\\"state\\\":\\\"turn_done\\\"}\"",
-            "timeout": 5
-          }
-        ]
-      }
+      { "matcher": "", "hooks": [ { "type": "command", "command": "curl -s -X POST http://127.0.0.1:47623/event -H \"Content-Type: application/json\" -d \"{\\\"state\\\":\\\"turn_done\\\"}\"", "timeout": 5 } ] }
     ],
     "UserPromptSubmit": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "curl -s -X POST http://127.0.0.1:47623/event -H \"Content-Type: application/json\" -d \"{\\\"state\\\":\\\"thinking\\\"}\"",
-            "timeout": 5
-          }
-        ]
-      }
+      { "matcher": "", "hooks": [ { "type": "command", "command": "curl -s -X POST http://127.0.0.1:47623/event -H \"Content-Type: application/json\" -d \"{\\\"state\\\":\\\"thinking\\\"}\"", "timeout": 5 } ] }
     ]
   }
 }
 ```
 
-## Design decisions (and why)
+**The `timeout: 3600` on `PermissionRequest` is not a typo.** That connection
+stays open while you decide, so the timeout has to cover a human, not a network.
+If it does expire before you click, Claude Code just shows its own prompt as
+usual — annoying, not dangerous.
 
-**The hook itself answers the prompt — no PTY keystrokes involved.** An
-earlier version of this file claimed the `PermissionRequest` hook's JSON
-decision (`{"hookSpecificOutput":{"decision":{"behavior":"allow"|"deny",
-...}}}`) only takes effect in headless/auto-mode, and that a normal
-interactive terminal session could only be answered by writing real
-keystrokes into its PTY. That claim was **wrong** — confirmed against
-Claude Code's own hook documentation (code.claude.com/docs/en/hooks): the
-hook's decision is honored in interactive sessions too, auto-answering the
-prompt before it's even shown. This is exactly how AgentGlance (a comparable
-macOS tool for Claude Code) does it, and this app now works the same way.
+### What you will see
 
-So `/decide`'s HTTP request is held open — not responded to immediately —
-for as long as it takes the human to click Approve/Deny (or, for
-`AskUserQuestion`, pick option chips and hit Submit) in the mascot. Claude
-Code itself blocks the tool call on that response, so approving/denying from
-the widget IS the decision. No keystroke is written anywhere — the mechanism
-that used to type digits into a PTY (`highest_numbered_option`,
-`wait_for_prompt_visible`, `write_keys`) is gone, and so is the PTY.
+| Hook | On the mascot |
+|---|---|
+| `PermissionRequest` | A pinned card with the real tool name, command and diff, plus Approve/Deny |
+| `Notification` | Expands, different text, a soft chime — Claude is waiting on you |
+| `PreToolUse` | Collapses back to the idle pill; also drives the "coding" mood |
+| `PermissionDenied` | Same as `PreToolUse`. Only fires for auto-mode denials, not for you clicking Deny |
+| `Stop` | A brief flash and a quiet tick, then settles |
+| `UserPromptSubmit` | Ambient only — shows "thinking" briefly. Never opens a card |
 
-**Because the timeout must span the human, not the network.** Holding the
-hook's HTTP connection open for potentially minutes (however long the
-person takes to decide) means the hook's own `timeout` in `settings.json`
-must be generous — set to 3600s above, not the 5s that was fine when
-`/decide` used to respond instantly. If this hook ever times out before you
-click, Claude Code falls back to showing its own interactive prompt as if no
-hook existed — annoying but not unsafe.
+If a card sits unanswered longer than the threshold in **Settings → Advanced**,
+the mascot moves to a "forgotten" pose so you can tell at a glance that something
+has been waiting a while.
 
-**`AskUserQuestion` gets its own rendering, not a generic Approve/Deny.**
-When the hook's `tool_name` is `AskUserQuestion`, its `tool_input.questions`
-array (`question`/`header`/`options[].label`/`multiSelect` per question — the
-exact shape Claude Code's own multi-choice prompt renders from) is parsed
-out and shown as tappable option chips (see `main.js`'s `buildQuestionUI`).
-Submitting sends the answer back as the *same* hook response, with
-`updatedInput: {questions, answers}` instead of `updatedInput` left unset —
-matching AgentGlance's own answer contract, since Claude Code doesn't
-document this specific shape itself. No keystrokes here either.
+### Testing without Claude Code
 
-**What stayed the same:** `tool_name`/`tool_input` are still real, structured
-data parsed straight from the hook payload, not text scraped off a rendered
-terminal screen. This app is still Claude Code only — no Codex/Cursor/
-Antigravity support.
-
-**The app no longer runs terminals of its own.** It used to keep a pool of
-sixteen PTY-backed windows so it could watch Claude by reading what they
-rendered, and `WIDGET_TERMINAL_LABEL` (set per pooled shell, inherited down to
-the hook's own child process) told it which window a hook came from. The hooks
-made the watching unnecessary, and they fire wherever you actually run Claude —
-so the pool was spending sixteen `cmd.exe` and sixteen `conhost.exe` at every
-launch to support a case that no longer existed, and closing one of its windows
-could take the widget with it.
-
-That removal fixed a bug rather than causing one. "Somebody is waiting on you"
-was a flag on one of *our* sessions, keyed by that label — so running Claude in
-your own terminal showed the permission card but never moved the mascot into its
-`waiting`/`forgotten` pose, because there was no session of ours to flag. It is
-now counted straight from the held-open requests (`pending_permissions` in
-`agent/server.rs`), which works for any terminal.
-
-`?label=` in the `/decide` URL is now optional and purely cosmetic — whatever it
-contains captions the card, and an absent one just reads "Claude Code". Leaving
-`$WIDGET_TERMINAL_LABEL` in your hook command is harmless: it expands to
-nothing. What genuinely went away is "click a session to focus its window",
-which is not answerable for a terminal this app didn't launch.
-
-**`PreToolUse`/`PermissionDenied` are about ambient mood, not the permission
-card.** The permission card itself never needs a safety timeout anymore — it
-closes the instant Approve/Deny/Submit resolves the held-open hook request,
-deterministically, every time. `PreToolUse` (fires unconditionally right as
-an approved tool is about to run) and `PermissionDenied` (fires only for
-auto-mode/classifier-driven denials, confirmed by its call site being
-wrapped in `if (decisionReason.type === "classifier" && decisionReason.classifier === "auto-mode")`
-— clicking "No" in a genuinely interactive prompt doesn't trigger it at all)
-exist solely to drive the pip ambient mood's "coding" vs "idle" signal (see
-`signals.js`), which is a separate, lower-stakes concern from the permission
-card's own state.
-
-**The window never resizes at runtime — only CSS does.** The OS window is
-created once at a fixed size (large enough for the biggest expanded state,
-see `tauri.conf.json`) and never touched again. An earlier version called
-`window.set_size()` on every state change; the outer window measurably grew
-(confirmed via `outer_size()`), but the embedded WebView2 surface kept
-rendering at the old size, leaving most of the "expanded" window blank. All
-growing/shrinking is now a pure CSS `width`/`height` transition on the inner
-`#mascot` div, anchored to the top of the fixed window — this sidesteps that
-native-resize/webview-repaint mismatch entirely.
-
-## States the mascot reacts to
-
-| State               | Fired by                                    | Mascot behavior                                                    |
-|---------------------|------------------------------------------------|---------------------------------------------------------------------|
-| `agent_permission`  | `PermissionRequest` (any — `label` resolvable or not) | Pinned card: real tool name/command/diff + Approve/Deny, or (for `AskUserQuestion`) tappable option chips + Submit. Answering resolves the held-open hook request directly — no PTY keystrokes. |
-| `waiting_input`     | `Notification`                                 | Expanded pill, different text, softer single chime                  |
-| `idle`              | `PreToolUse` / `PermissionDenied` / default     | Collapses immediately back to the small idle pill                   |
-| `turn_done`         | `Stop`                                          | Brief brightness flash + quiet tick, then settles to idle            |
-
-`UserPromptSubmit` is NOT in this table on purpose — it never touches
-`mascot-state`/body.className at all (see agent/server.rs's `handle_event_request`).
-It's purely an ambient pip-mood signal instead: `signals.js` listens for it
-directly and shows "thinking" for a short window right after the human
-submits a prompt, backing off in favor of "coding" the moment a real
-`PreToolUse` fires. See `src/mascot/signals.js`'s own header comment for how
-the ambient system and this notice/card system stay deliberately decoupled.
-
-## Manual test (without Claude Code)
-
-With the widget running (`npm run tauri dev`), verify each state from a shell:
+From a terminal you opened yourself:
 
 ```bash
-curl -X POST http://127.0.0.1:47623/event -d "{\"state\":\"waiting_input\"}"
+curl -X POST http://127.0.0.1:47623/event -d '{"state":"waiting_input"}'
+curl -X POST http://127.0.0.1:47623/event -d '{"state":"turn_done"}'
+curl -X POST http://127.0.0.1:47623/event -d '{"state":"idle"}'
 
-# Ambient-only — never touches the notice/card system, just the pip mood
-# (signals.js): watch #mascot's data-pip-state switch to "thinking" for
-# ~25s, or immediately back to "coding"/whatever else if you also fire a
-# real hook event in that window.
-curl -X POST http://127.0.0.1:47623/event -d "{\"state\":\"thinking\"}"
+# A permission card. This will SIT THERE until you click Approve or Deny —
+# that is correct, not a hang. The decision JSON prints when you answer.
+curl -X POST http://127.0.0.1:47623/decide \
+  -d '{"tool_name":"Bash","tool_input":{"command":"ls -la"}}'
 
-# /decide now HOLDS THE CONNECTION OPEN until you click Approve/Deny in the
-# widget — curl will just sit there (that's correct, not a hang). Its
-# response body is Claude Code's own decision JSON, printed once you answer:
-curl -X POST http://127.0.0.1:47623/decide -d "{\"tool_name\":\"Bash\"}"
-
-# Rich card. `label` is optional and cosmetic — whatever you pass captions the
-# card; omit it and it reads "Claude Code". Either way the mascot goes to its
-# "waiting" pose while this sits open, and "forgotten" once it has waited longer
-# than the threshold in Settings > Advanced:
-curl -X POST "http://127.0.0.1:47623/decide?label=my-shell" \
-  -d "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"ls -la\"}}"
-
-# AskUserQuestion — renders as tappable option chips instead of Approve/Deny;
-# submitting sends the answer back as this same curl's response body:
-curl -X POST http://127.0.0.1:47623/decide -d '{"tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"Which approach?","header":"Approach","multiSelect":false,"options":[{"label":"Option A"},{"label":"Option B"}]}]}}'
-
-curl -X POST http://127.0.0.1:47623/event -d "{\"state\":\"idle\"}"
-curl -X POST http://127.0.0.1:47623/event -d "{\"state\":\"turn_done\"}"
+# Option chips instead of Approve/Deny:
+curl -X POST http://127.0.0.1:47623/decide \
+  -d '{"tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"Which approach?","header":"Approach","multiSelect":false,"options":[{"label":"Option A"},{"label":"Option B"}]}]}}'
 ```
 
-**Important:** if you're testing from inside a live Claude Code session
-(rather than a plain terminal), remember that the `curl`/PowerShell command
-you use to test *is itself* a tool call — it will trigger the real
-`PermissionRequest`/`PreToolUse` hooks for its own execution, on top of
-whatever payload you're sending. For a clean, uncontaminated test, run the
-curl command from a terminal window you opened yourself, completely outside
-Claude Code.
+Two things that will confuse you if you don't know them:
 
-## Debugging notes from getting this working
+- **Run these outside Claude Code.** Inside a session, your `curl` *is itself* a
+  tool call, so it fires the real hooks on top of whatever you sent.
+- **This endpoint refuses browser requests.** Anything carrying an `Origin` or
+  `Sec-Fetch-*` header gets `403`, because otherwise any web page you had open
+  could put a fake permission card on your screen. `curl` and Claude Code send
+  neither, so they are unaffected — but a browser, a REST client, or a fetch from
+  devtools will be rejected. Use `curl`.
 
-A few real bugs surfaced during development, in case similar symptoms show
-up again after future changes:
+---
 
-1. **Wrong hook event names.** `Notification` with `permission_prompt`/
-   `idle_prompt` matchers doesn't exist in Claude Code. The real events are
-   the top-level `PermissionRequest` and plain `Notification` (no matcher).
-   Confirmed by grepping the installed VS Code extension's
-   `claude-code-settings.schema.json` and the bundled
-   `resources/native-binary/claude.exe` for literal strings — e.g.
-   `grep -a -o ".\{100\}PermissionRequest.\{100\}" claude.exe` — rather than
-   trusting docs/memory. Same technique confirmed the `/decide` hook's real
-   output contract: `{"decision":"approve"|"block"|"ask"}` on stdout.
-2. **Per-window ACL blocks Tauri APIs silently.** Tauri v2 scopes frontend
-   permissions per window label in `src-tauri/capabilities/*.json`
-   (`"windows": [...]`). If that list doesn't match the actual window label
-   in `tauri.conf.json`, `listen()`/`invoke()` calls silently receive
-   nothing — the backend still returns `200 ok`, which is easy to mistake
-   for a hook problem when it's actually a frontend permissions problem.
-3. **AudioContext autoplay policy.** Web Audio is often blocked from making
-   sound until a user gesture happens inside the page. Since this widget
-   never gets clicked, `additionalBrowserArgs:
-   "--autoplay-policy=no-user-gesture-required"` is set on the window in
-   `tauri.conf.json`.
-4. **Native window resize doesn't repaint the webview to match.** See "The
-   window never resizes at runtime" above.
-5. **Concurrent hook events racing each other.** Every hook fires on its own
-   thread; several can land within milliseconds during normal usage (e.g.
-   `PreToolUse` fires once per tool call). If backend state ever needs to be
-   mutated across concurrent requests again, guard it with a mutex —
-   unsynchronized concurrent writes were briefly a real bug here before the
-   architecture moved to pure event emission with no shared mutable window
-   state.
-6. **CSS class name typo (underscore vs. hyphen) — the actual root cause of
-   the "nothing visually updates" bug that took the longest to find.** JS
-   state strings use underscores (`waiting_permission`, `waiting_input`,
-   matching `VALID_STATES` in `main.js`), so `document.body.className =
-   \`state-${state}\`` produces classes like `state-waiting_permission`.
-   CSS selectors must match **exactly** — `.state-waiting-permission` (hyphen)
-   silently never matches `state-waiting_permission` (underscore). Every
-   other part of the pipeline (hook → backend → emit → JS state handler →
-   sound) was working the entire time; only the CSS selector was wrong,
-   which is why sound played but nothing ever looked different. Diagnosed by
-   bypassing CSS entirely with a temporary inline-style test
-   (`element.style.background = "lime"`) to prove JS→DOM was fine, which
-   narrowed it down to CSS class matching specifically.
+## 4. Voice
 
-## Notes
+Say **"hey pixy"** and it starts listening. No key press, and nothing leaves the
+machine until the wake word actually fires — the detection runs in the app.
 
-- The port (`47623`) is a setting: **Settings → Advanced → Claude Code event
-  port**. Only worth changing if something else on your machine already uses
-  it. Two things to know when you do: the widget has to be restarted (the
-  socket is bound at launch), and the hook commands above have to be updated
-  to the new port by hand — nothing here can edit your Claude Code settings
-  for you. The Advanced section spells the new URLs out next to the field.
-  If the port is already taken, the widget logs the failure to stderr and the
-  hooks simply do nothing, so check there first if the mascot stops reacting.
-- Everything else in **Settings → Advanced** is the same kind of value: it
-  depends on your machine rather than on the widget (room noise, speech-server
-  speed, how long away from the keyboard counts as away). The defaults and the
-  explanation of what each one trades off live in one place,
-  `src-tauri/src/tunables.rs`; the form is generated from it, and the frontend
-  reads its values from there too, so there is no second copy to keep in sync.
-- This app is Claude Code only by design now — the terminal-screen-scraping
-  approach that used to also (best-effort) support Codex/Cursor/Antigravity
-  has been removed in favor of Claude Code's own hook system, which those
-  other CLIs don't expose an equivalent of. See `agent/server.rs`'s
-  `resolve_decision`/`handle_decide_request` and this file's design-decisions
-  section above.
+**Settings → Voice** to turn it on, plus:
+
+- **Settings → STT** — a transcription server. whisper.cpp's server works, as does
+  anything OpenAI-compatible; Pixy tries both routes and tells you if it finds
+  neither.
+- **Settings → TTS** — a speech server for replies out loud. Kokoro-FastAPI or
+  anything OpenAI-compatible.
+
+The wake word costs an 11 MB download the first time you enable it, and nothing
+at all if you never do.
+
+**Settings → Advanced** has the knobs that depend on your room rather than on the
+app: detection threshold, how much silence ends a sentence, how long to keep
+listening. If it triggers on the TV, raise the threshold there.
+
+---
+
+## 5. Pictures
+
+Type **`/image a cat wearing a hat`** in the chat.
+
+**Settings → Images** points at a local [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp)
+server and sets size, steps and seed. Prompts only ever go to a local server —
+that is enforced in code, not a setting you can get wrong.
+
+**The server starts when you ask for a picture and stops when you stop asking.**
+It is deliberately not autostarted: the picture model and the chat model together
+want more VRAM than a 16 GB card has, and Windows answers that by paging to system
+memory rather than refusing — so both *look* loaded while everything crawls. The
+first picture after a pause therefore takes longer (the model has to load); the
+next few are quick. The idle timeout is in **Settings → Advanced**.
+
+Generated images are saved to disk and clicking one opens it full size.
+
+---
+
+## 6. Gmail and Calendar
+
+What you get: unread mail announced as a notice with a one-line summary written
+by *your* local model, a once-a-day morning brief card, and a nudge before a
+meeting starts. Across every account you connect.
+
+### You need your own Google OAuth client
+
+There is no shared Pixy application — a desktop app cannot keep a client secret,
+so you make your own. Once, in about five minutes:
+
+1. Go to [Google Cloud Console](https://console.cloud.google.com/) and create a
+   project (or pick one).
+2. **Enable the APIs you want.** APIs & Services → Library → enable **Gmail API**
+   and **Google Calendar API**. This step is easy to skip and the failure is
+   confusing — see the troubleshooting note below.
+3. APIs & Services → OAuth consent screen → set it up. Add your own email under
+   **Test users** if the app is in testing mode.
+4. Credentials → Create credentials → **OAuth client ID**.
+   **Application type must be "Desktop app".**
+5. Copy the client ID and client secret into **Settings → Google**.
+6. Press **Add account** and complete the browser sign-in. Repeat for each
+   mailbox.
+
+> **⚠ "Desktop app", not "Web application".** This is the single most common
+> mistake. Pixy signs you in on a temporary local port, and only Desktop-app
+> clients are allowed to do that — a Web application client requires every
+> redirect URL to be registered in advance, so you get
+> `Error 400: redirect_uri_mismatch` and no amount of retrying helps.
+
+### Tuning what you see
+
+**Settings → Advanced**, Mail and Calendar sections:
+
+- **How far back unread counts** — default 1 day. Set it to 7 and the brief covers
+  a week. The unread count on the card follows the same window.
+- **How many messages the brief shows** — it is not capped at a handful; all
+  connected accounts are included, newest first, with replies to you first.
+- **Summarise with local models only** — **on by default.** With it on, a message
+  is never sent to a hosted model; if no local model is available the notice shows
+  the message's own opening lines instead of turning the feature off.
+- **Minimum length worth summarising** — short mail explains itself.
+
+Use **tray → Run Morning Brief Now** to see the result immediately instead of
+waiting for tomorrow.
+
+---
+
+## 7. GitHub
+
+Notices for merged PRs, failing CI, and issues assigned to you.
+
+**Settings → GitHub**: paste a personal access token (`repo` scope is enough for
+private repositories; public-only needs less) and add the repositories to watch.
+**Test connection** tells you whether the token works and what it can see.
+
+**tray → Run GitHub Digest Now** fires the daily digest on demand.
+
+---
+
+## 8. Day to day
+
+**The mascot** sits at the top of the screen and is click-through except where it
+actually has something — so it does not steal clicks from the window behind it.
+Notices stack; cards pin until answered. Click the mascot for a quick menu.
+
+**The workspace** (tray → Open Workspace) has three panes:
+
+- **Chat** — as above.
+- **Notes** — markdown with `[[wiki-links]]` between notes. Pick where they live
+  in Settings, so they can sit in a synced folder.
+- **Memory** — a browser over Claude Code's own memory files, with a graph of how
+  they link.
+
+**Settings → Advanced** deserves one look. Everything in it is a value that
+depends on your machine rather than on the app — room noise, how fast your speech
+server is, how long away from the keyboard counts as away. Each field explains
+what it trades off, and the defaults are sensible; you do not have to touch any of
+it.
+
+---
+
+## 9. When something doesn't work
+
+**"All my settings vanished."** Look in
+`%APPDATA%\com.widget.mascot\` for a `config.json.corrupt-<timestamp>` file. If
+one is there, the config could not be parsed and was kept rather than
+overwritten — the settings are in that file and can be recovered by hand.
+
+**Google: "Gmail API has not been used in project … or it is disabled."** Step 2
+above was skipped. The message includes a link straight to the page that enables
+it. Pixy passes Google's own wording through rather than guessing, so believe the
+message.
+
+**`Error 400: redirect_uri_mismatch`** when adding an account. The OAuth client is
+a "Web application". Make a new one as **Desktop app**.
+
+**A mail notice shows the raw message instead of a summary.** The model was asked
+and could not answer in time — usually because something else is using the GPU. If
+the picture server is running, that is the likely culprit. `mail-watcher-debug.log`
+in the app data folder records why, in counts and reasons only — never the
+contents of your mail, so it is safe to paste into an issue.
+
+**Chat: "stream read error".** The model took longer than the reply timeout.
+Vision models on long images are the usual cause. Raise **Settings → Advanced →
+reply timeout**.
+
+**The mascot stopped reacting to Claude Code.** In order:
+
+1. Is the port free? If something else took `47623`, Pixy logs the bind failure
+   and the hooks silently do nothing. Change it in **Settings → Advanced → Claude
+   Code event port**, then **restart the app** — the socket is bound at launch —
+   and update the port in your hook commands by hand. Nothing here can edit your
+   Claude Code settings for you.
+2. Are you testing from a browser or REST client? Those get `403` by design. Use
+   `curl`.
+3. Does `curl -X POST http://127.0.0.1:47623/event -d '{"state":"waiting_input"}'`
+   move the mascot? If yes, the app is fine and the problem is in your hook
+   configuration.
+
+**A model server is still running after quitting.** Use **Quit and stop local
+servers** from the tray rather than closing the window. Pixy identifies the
+servers it started by which port they are listening on, so it can stop them even
+when they have outlived their parent process.
+
+**Sound plays but nothing looks different**, or vice versa. These are two
+independent paths (`notice/notice.js` for the pill, `lib/sound.js` for audio).
+See [docs/DESIGN-NOTES.md](docs/DESIGN-NOTES.md) — this exact split has bitten
+before and the diagnosis is written down.
+
+---
+
+Pixy is Claude Code only by design. The hook system it relies on has no
+equivalent in Codex, Cursor or Antigravity, and the screen-scraping approach that
+used to half-support them was removed in its favour.
