@@ -1,178 +1,229 @@
-# Pixy — a desktop mascot that watches your work
+# Pixy
 
-An always-on-top mascot overlay for Windows that bridges Claude Code hooks, a
-local LLM, voice, Gmail, Calendar and GitHub into one place you can glance at.
-It answers Claude Code's permission prompts, tells you when a build breaks or an
-issue lands on you, summarises your unread mail, and gets out of the way when it
-has nothing to say.
+A little robot that sits on your desktop and keeps an eye on your work.
 
-Built with [Tauri 2](https://tauri.app) — Rust backend, vanilla-JS frontend, no
-bundler.
+Pixy answers Claude Code's permission prompts, chats with a language model
+running on your own machine, remembers what you talked about last week, reads
+your unread mail out loud if you want, and tells you when the build breaks. Then
+it goes quiet until it has something to say.
+
+**Everything runs on your machine.** No account, no telemetry, no server of ours
+— there isn't one. Your chats, notes and search index never leave the disk they
+were written to.
 
 <!--
   SCREENSHOT GOES HERE. This is a visual application and no prose substitutes
   for one — a reader deciding whether to try this will decide from the picture.
-  Suggested: the mascot overlay with a permission card open, plus one of the
-  workspace chat. Put files in docs/ and reference them as:
-      ![The mascot answering a Claude Code permission prompt](docs/mascot.png)
+  Suggested: the mascot with a permission card open, plus one of the workspace
+  chat. Put files in docs/ and reference them as:
+      ![Pixy answering a Claude Code permission prompt](docs/mascot.png)
 -->
 
-> **Status:** used daily by its author on one machine. Windows-only today (see
-> [Platform support](#platform-support)). Interfaces are not stable.
+> **Status:** used daily by its author on one machine. Windows only for now.
+> Interfaces are not stable yet.
 
-## What it does
+---
 
-**Claude Code integration** — the reason it exists. Claude Code hooks POST to a
-small local HTTP server, and the mascot renders the permission request as a card
-you approve or deny; the answer goes back as the hook's own response. Tool use,
-thinking and waiting all show as mascot moods. `AskUserQuestion` renders as
-tappable chips. See [SETUP.md](SETUP.md) for the hook configuration.
+## Using it
 
-**Chat with a local model** — streaming replies, code blocks with syntax
-highlighting, document and image attachments, editable messages, per-message
-retry, and several named model profiles you can switch between mid-conversation.
-Points at anything OpenAI-compatible.
+Pixy is a small pill that floats above your other windows. Everything starts
+from there.
 
-**Recall across conversations** — full-text search (SQLite FTS5) over every past
-chat, plus a retrieval pass that pulls relevant earlier exchanges into a new
-question automatically. Question and answer are indexed as one unit, because a
-question on its own loses what was decided.
+### The mascot
 
-**Voice** — an on-device wake word ("hey pixy") running in the webview via ONNX,
-then transcription and speech through whatever local STT/TTS servers you point it
-at. Nothing is sent anywhere until the wake word fires.
+| Gesture | What happens |
+|---|---|
+| **Drag** | Move it anywhere on screen |
+| **Single click** | Opens the music panel — play/pause, skip, what's playing |
+| **Double click** | Opens a terminal |
+| **Right click** | Opens the quick menu: **Workspace**, **Settings**, **Hide** |
+| **Esc** | Closes the quick menu |
 
-**Pictures** — text-to-image through a local stable-diffusion.cpp server, started
-on demand when you ask for a picture and shut down again when you stop, because
-it and the chat model together want more VRAM than a 16 GB card has.
+Clicks pass straight through to whatever is underneath unless the cursor is
+actually on Pixy, so it can sit on top of your editor without getting in the way.
 
-**Mail and calendar** — unread Gmail announced as notices with a one-line summary
-written by the local model, a once-a-day morning brief card, and a nudge before a
-meeting starts. Across all connected accounts.
+### When a card appears
 
-**GitHub** — merged PRs, failing CI, and issues assigned to you, as notices.
+Pixy expands into a card when something needs you, and shrinks back when it's
+handled.
 
-**Notes and memory** — a markdown notes pane with wiki-links, and a browser over
-Claude Code's own memory files.
+| Card | What you do |
+|---|---|
+| **Permission request** | **Approve** or **Deny** — the answer goes straight back to Claude Code. **×** dismisses it (counts as deny) |
+| **A question from Claude** | Tap the option chips, then **Submit** |
+| **Morning brief / digest** | Read it, click **×** when done |
+| **Mail, meetings, GitHub** | Click through to open the relevant thing |
 
-## Requirements
+### The tray icon
 
-- **Windows 10/11.** WebView2 is required and ships with Windows 11.
-- **Rust** (stable) and the [Tauri 2 prerequisites](https://tauri.app/start/prerequisites/).
-- **Node** only for `npm test` and the Tauri CLI. There is no frontend build.
+Right-click it for everything the mascot can't reach:
 
-Everything else is optional and discovered at runtime — the app starts fine with
-no model, no accounts and no tokens, and each feature stays quiet until it is
-configured.
+**Show mascot** · **Hide mascot** · **Open Workspace** · **Open Settings** ·
+**Open Terminal** · **Run GitHub Digest Now** · **Run Morning Brief Now** ·
+**Quit** · **Quit and stop local servers**
+
+### The workspace window
+
+Three tabs: **Chat**, **Notes**, **Memory**.
+
+| Shortcut | Where | What |
+|---|---|---|
+| `Ctrl+E` | Notes | Toggle markdown preview |
+| `Ctrl+F` | Notes | Find & replace |
+| `Ctrl+.` / `Esc` | Notes | Focus mode |
+
+### Talking to it
+
+Say **"hey pixy"** and it listens. Everything — the wake word, the
+transcription, the reply, the voice — runs locally against servers you point it
+at. Nothing is recorded or sent anywhere before the wake word fires.
+
+---
+
+## What it can do
+
+### Claude Code
+Claude Code's hooks talk to a small local server, so permission prompts show up
+as a card you can answer from anywhere — no need to find the right terminal. The
+real command, file path and diff are on the card, straight from the hook. Several
+sessions can be waiting at once; they stack. Multiple-choice questions become
+tappable chips. Pixy's mood follows along: thinking, working, waiting on you.
+
+### Chat
+Point it at any OpenAI-compatible server and chat with streaming replies, syntax
+highlighting and several named model profiles you can switch between mid-thought.
+Attach documents (`pdf` `docx` `pptx` `xlsx` `csv` `md` `txt` `json` `html`) or
+images. Edit a message and send it again, or retry just one reply. The model can
+search the web and read pages when it needs to.
+
+### Memory
+Full-text search over every past conversation, plus a retrieval pass that quietly
+brings the relevant bit of an old chat into a new question. Ask "what did we
+decide about caching?" and it finds the conversation that said *cache*. Add an
+embedding server and it will also find the one that made the same point in
+different words. Claude Code's own project notes can be searched alongside.
+
+### Voice
+An on-device wake word, then transcription and speech through whatever local
+STT/TTS servers you like.
+
+### Pictures
+Text-to-image through a local stable-diffusion server, started when you ask for a
+picture and shut down when you stop — because it and the chat model together want
+more VRAM than most cards have.
+
+### Mail and calendar
+Unread Gmail announced with a one-line summary written by your local model, a
+morning brief once a day, and a nudge before a meeting starts. Works across
+several accounts. You bring your own OAuth client.
+
+### GitHub
+Merged pull requests, failing CI, issues assigned to you, and reviews someone is
+waiting on — as notices, not another tab to check.
+
+### Notes and memory graph
+A markdown notes pane with wiki-links, pinning, trash, find & replace and a focus
+mode. Notes are real files in a real folder, editable by anything. Alongside it, a
+graph view of Claude Code's own memory files.
+
+### Your machine
+Music controls, per-app volume, speaker and microphone mute, and enough awareness
+of whether you're on a call, on battery or away that Pixy can stay out of the way.
+
+---
 
 ## Running it
 
 ```sh
-git clone <this repo> && cd Widget
-npm install                 # just @tauri-apps/cli
+git clone https://github.com/erberkk/pixy && cd pixy
+npm install          # just the Tauri CLI
 npm run tauri dev
 ```
 
-Then open Settings from the tray icon and configure what you want. Nothing needs
-to be set up in a particular order.
+Or grab an installer from [Releases](../../releases) — it's unsigned, so Windows
+will warn you once.
+
+**Requirements:** Windows 10/11 and [Rust](https://tauri.app/start/prerequisites/).
+Node is only needed for the CLI and tests; there is no frontend build step.
+
+Everything else is optional and found at runtime. Pixy starts fine with no model,
+no accounts and no tokens — each feature simply stays quiet until you set it up.
+
+Open **Settings** from the tray and fill in what you want, in any order.
+**[SETUP.md](SETUP.md)** walks through each one, including the Claude Code hooks
+you'll need to paste into `.claude/settings.json`.
 
 ```sh
-npm test                    # frontend tests (Node's built-in runner, no deps)
-cd src-tauri && cargo test  # backend tests
+npm test                    # 10 frontend tests, no dependencies
+cd src-tauri && cargo test  # 210 backend tests
 ```
 
-> **A note on iterating:** the frontend is compiled into the binary, so editing a
-> `.js` or `.css` file needs a rebuild to take effect. That surprises everyone
-> once.
+> **If you're changing the code:** the frontend is compiled into the binary, so
+> editing a `.js` or `.css` file needs a rebuild before you'll see it. That
+> surprises everyone once.
 
-## Security model
+---
 
-This app reads web pages a language model chose, runs a local HTTP server, and
-holds OAuth refresh tokens. That combination deserves a straight answer rather
-than a reassurance, so it has its own document: **[SECURITY.md](SECURITY.md)**.
+## Local by default
 
-The short version:
+Pixy reads web pages a language model chose, runs a local HTTP server and holds
+OAuth tokens. That deserves a straight answer rather than a reassurance, so it
+has its own document: **[SECURITY.md](SECURITY.md)**.
 
-- Everything is **local by default**. Chat history, notes, memory and the search
-  index never leave the machine. Recall results are not sent to a non-local
-  endpoint unless you explicitly turn that on.
-- You supply **your own OAuth client** and your own tokens. There is no shared
-  application and no secret compiled into the binary — a desktop binary cannot
-  keep one.
+- Chat history, notes, memory and the search index **never leave the machine**.
+  Remembered history isn't sent to a hosted model unless you turn that on.
+- You supply **your own OAuth client and tokens**. There is no shared application
+  and no secret compiled into the binary — a desktop app can't keep one.
 - Secrets are stored **in plaintext** in `%APPDATA%\com.widget.mascot\config.json`.
-  That is a deliberate trade-off for a local-first tool, and SECURITY.md explains
-  it rather than hiding it.
-- Content fetched from the web is treated as **hostile input**: the URL is checked
-  against a public-address allow-list and then pinned so DNS cannot change its
-  mind between the check and the connection, the download is capped, and the
-  renderer refuses to emit a link whose scheme it does not recognise.
+  A deliberate trade-off for a local-first tool, explained rather than hidden.
+- Web content is treated as **hostile**: addresses are checked and then pinned so
+  DNS can't change its mind, downloads are capped, and the renderer refuses to
+  emit a link whose scheme it doesn't recognise.
+
+---
 
 ## Platform support
 
-**Windows only, today.** Not by design — the platform-specific parts are
-concentrated rather than spread out, and none of them are architectural:
+**Windows only today** — not by design. The platform-specific parts sit in four
+files: `system/media.rs` (audio sessions, mute, media keys), `ai/process.rs`
+(finding a local server by the port it listens on), `system/power.rs` (idle and
+battery) and `ui/clickthrough.rs`. Roughly half a day of `#[cfg]` work plus a
+machine to test on. Everything above them is already platform-neutral.
 
-| What | Where | Porting cost |
-|---|---|---|
-| Audio sessions, mic/speaker mute | `src-tauri/src/system/media.rs` | Rewrite against the platform mixer |
-| Process lookup by listening port | `src-tauri/src/ai/process.rs` | `netstat` parsing → `lsof` |
-| Idle time and power status | `src-tauri/src/system/power.rs` | Platform API |
-| Spotify control | `src-tauri/src/system/media.rs` | Platform API |
-| Click-through overlay behaviour | `src-tauri/src/ui/clickthrough.rs` | Per-platform window flags |
+## Under the hood
 
-Roughly half a day of `#[cfg]` work plus a machine to test on. Everything above
-those files — chat, recall, voice, mail, calendar, GitHub, the hook server — is
-platform-neutral already.
-
-## How it is put together
+[Tauri 2](https://tauri.app) — Rust backend, vanilla-JS frontend, **no bundler**.
+About 17k lines each side, 90 commands, 220 tests.
 
 ```
-src/                       Frontend — one directory per window, native ES modules
-├── mascot/                The overlay: sprite, notices, voice, quick menu
-├── workspace/             Main window: chat, notes, memory
-├── settings/              Settings window
-├── shared/                Cross-window: markdown, tauri bindings, formatting
-└── vendor/                highlight.js, ONNX Runtime — see THIRD-PARTY-NOTICES.md
+src/                  one directory per window, native ES modules
+├── mascot/           the overlay: sprite, notices, voice, quick menu
+├── workspace/        chat, notes, memory
+├── settings/         settings window
+├── shared/           markdown, Tauri bindings, the sprite renderer
+└── vendor/           highlight.js, ONNX Runtime
 
-src-tauri/src/             Backend — one module group per feature area
-├── ai/                    chat, llm, images, recall, speech, voice, tools, process
-├── google/                OAuth, Gmail and Calendar clients — mechanism only
-├── mail/  calendar/       …and the policy over them: what is worth announcing
-├── github/                API client and its watchers
-├── web/                   search, fetch, extraction — the untrusted-input side
-├── agent/                 the Claude Code hook HTTP server
-├── content/               notes, memory, document parsing
-├── system/  ui/           OS integration, window and tray behaviour
-├── config.rs              the one settings file
-└── tunables.rs            per-machine values, so nothing is hardcoded twice
+src-tauri/src/        one module group per feature area
+├── ai/               chat, models, images, recall, speech, voice, tools
+├── google/           OAuth, Gmail, Calendar — mechanism only
+├── mail/ calendar/   …and the policy over them: what's worth announcing
+├── github/  web/     API clients, and the untrusted-input side
+├── agent/            the Claude Code hook server
+├── content/          notes, memory, document parsing
+└── system/  ui/      OS integration, windows, tray
 ```
 
-Around 17k lines of Rust and 17k of frontend (plus ~1.7k vendored), 88 Tauri
-commands, 204 Rust tests and 10 frontend tests.
-
-Two conventions worth knowing before reading the code:
-
-- **`google/` is a mechanism layer; `mail/` and `calendar/` are policy.** One
-  OAuth grant is shared by two unrelated features, so the transport was promoted
-  to its own group. `github/` keeps its client and watchers together because
-  nothing outside GitHub uses them. The rule: a group owns both client and
-  consumers *unless* the client is shared across feature domains.
-- **Comments explain decisions, not mechanics.** Where one records a measurement
-  ("`IsHungAppWindow()` returned true within two seconds") that measurement is
-  why the code is shaped the way it is. If you change such code, the comment is
-  the argument you have to answer.
-
-The decisions too large to fit in a comment are in
-[docs/DESIGN-NOTES.md](docs/DESIGN-NOTES.md) — why the hook answers Claude Code's
-prompt directly, why the window never resizes at runtime, and a list of bugs whose
-symptoms were nothing like their causes.
+The decisions too large for a comment live in
+**[docs/DESIGN-NOTES.md](docs/DESIGN-NOTES.md)** — why the hook answers Claude
+Code directly, why the window never resizes, and a list of bugs whose symptoms
+were nothing like their causes.
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) — the build, the no-bundler asset step
+See **[CONTRIBUTING.md](CONTRIBUTING.md)** — the build, the no-bundler asset step
 that catches everyone out once, and what the tests expect.
 
 ## License
 
-MIT — see [LICENSE](LICENSE). Third-party components redistributed in this
-repository are listed in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+MIT — see [LICENSE](LICENSE). Third-party components redistributed here are
+listed in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
