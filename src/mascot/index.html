@@ -39,6 +39,10 @@
           <span class="pixy-title" id="pixy-title">Idle</span>
           <span class="pixy-sub" id="pixy-sub">standing by</span>
         </div>
+        <!-- Only ever visible in conversation mode (voice.css keys it off
+             data-pixy-state), because it is the only way out of it: while that
+             mode is on the microphone stays open through silence on purpose. -->
+        <button class="voice-stop-btn" id="voice-stop-btn" title="Stop listening">Stop</button>
         <div class="pixy-ind" id="pixy-ind">
           <div class="i-dots"><i></i><i></i><i></i></div>
           <div class="i-ring"></div>

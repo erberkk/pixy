@@ -111,6 +111,17 @@ export const PIXY_META = {
   // them, so there is no fourth entry here.
   hearing: { ind: "eq", title: "Listening", sub: "go ahead" },
   speaking: { ind: "eq", title: "Answering", sub: "" },
+  // The spoken path running a tool (voice.allow_tools). Its own pose rather than
+  // reusing `thinking`, because the two mean different things to whoever is
+  // waiting: thinking is the model working, searching is the network — and the
+  // second one is the one worth explaining out loud.
+  searching: { ind: "dots", title: "Searching", sub: "looking it up" },
+  // Conversation mode holding the floor between questions. Distinct from
+  // `hearing` on purpose: hearing is one question being recorded, conversing is
+  // the microphone staying open with nobody talking — the state worth being able
+  // to notice from across the room.
+  conversing: { ind: "eq", title: "Go ahead", sub: "still listening" },
+
   juggling: { ind: "dots", title: "Juggling", sub: "several sessions running" },
   forgotten: { ind: "bang", title: "Still waiting", sub: "approval sitting a while" },
   review_requested: { ind: "caret", title: "Review requested", sub: "someone needs your eyes" },

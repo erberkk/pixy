@@ -31,6 +31,10 @@ let confirmedHops = 0;
 let threshold = 0.5;
 let cooldownUntil = 0;
 let activeRecorder = null;
+// Set by the Stop button and by nothing else. Conversation mode deliberately
+// does not end on silence — the whole point is that it waits for you — so this
+// flag is the only thing that closes the microphone again.
+let stopRequested = false;
 // Serializes wake-word scoring: see handleHop for why hops must not overlap.
 let scoreQueue = Promise.resolve();
 
@@ -85,6 +89,7 @@ async function stopVoice() {
   unsubscribe = null;
   activeRecorder?.cancel();
   activeRecorder = null;
+  setConversing(false);
   resetBuffers();
   clearEvent();
   await closeMic();
@@ -134,8 +139,22 @@ async function scoreHop(hop) {
   runTurn();
 }
 
+// Whether the conversation is open, as a class on #mascot — which is what makes
+// the Stop button visible (voice.css). A single owner for it, because a class
+// left set after the microphone closed would show a Stop button that stops
+// nothing, and one cleared too early would hide the only way out.
+function setConversing(on) {
+  document.getElementById("mascot")?.classList.toggle("in-conversation", on);
+}
+
 async function runTurn() {
   phase = "recording";
+  stopRequested = false;
+  // Up from the wake word onwards, not from the second turn — it has to be
+  // there while the assistant is recording, thinking, searching and answering,
+  // because those are exactly the moments somebody wants to cut it off. It
+  // comes down when the button is pressed, and not before.
+  setConversing(true);
   chirpWake();
   pushEvent("hearing", 30000);
 
@@ -147,7 +166,9 @@ async function runTurn() {
   if (phase === "off") return;
 
   if (!wav) {
-    chirpGiveUp();
+    // In conversation mode silence is ordinary — chirping every time somebody
+    // pauses to think would turn a quiet room into a metronome.
+    if (!t("voice.conversation") || stopRequested) chirpGiveUp();
     endTurn();
     return;
   }
@@ -167,13 +188,13 @@ async function runTurn() {
     }
 
     pushEvent("thinking", 120000, { title: "Thinking", sub: truncate(transcript) });
-    const reply = await speakStreamingReply(transcript);
+    const { text: reply, sources } = await speakStreamingReply(transcript);
     if (phase === "off") return;
 
     // Recorded once the whole reply is known, and not awaited: the pill has
     // nothing to show for it, and a failure to log must not cost the user the
     // answer they just heard.
-    invoke("record_voice_turn", { transcript, reply }).catch(() => {});
+    invoke("record_voice_turn", { transcript, reply, sources }).catch(() => {});
 
     // The transcript stays up briefly after the audio ends so there is a record
     // of what it thought you said — the most common thing to get wrong, and
@@ -240,11 +261,11 @@ function speakStreamingReply(transcript) {
       for (const p of unlisteners) p.then((off) => off()).catch(() => {});
       unlisteners.length = 0;
     };
-    const finish = (err, text) => {
+    const finish = (err, result) => {
       if (settled) return;
       settled = true;
       cleanup();
-      err ? reject(err) : resolve(text);
+      err ? reject(err) : resolve(result || { text: "", sources: [] });
     };
 
     const enqueue = (text) => {
@@ -274,6 +295,18 @@ function speakStreamingReply(transcript) {
         .catch((err) => finish(err instanceof Error ? err : new Error(String(err))));
     };
 
+    // A search is seconds of silence the model cannot explain, because it has not
+    // written its answer yet. Saying one line through the SAME queue the reply
+    // uses keeps the order right: the filler is spoken, then the answer, never
+    // both at once. Empty phrase means the user asked for silence.
+    unlisteners.push(
+      listen("voice-tool-start", (event) => {
+        if (event.payload?.turn_id !== turnId || phase === "off") return;
+        pushEvent("searching", 60000, { title: "Searching", sub: "looking it up" });
+        const filler = String(t("voice.search_filler") || "").trim();
+        if (filler) enqueue(filler);
+      })
+    );
     unlisteners.push(
       listen("voice-reply-sentence", (event) => {
         if (event.payload?.turn_id !== turnId || phase === "off") return;
@@ -284,9 +317,14 @@ function speakStreamingReply(transcript) {
       listen("voice-reply-done", (event) => {
         if (event.payload?.turn_id !== turnId) return;
         const full = event.payload.full_text;
+        // Pages the answer was built from, if the model searched. Carried out of
+        // the turn rather than saved here: record_voice_turn is called once, by
+        // the caller below, and it needs both halves.
+        const sources = event.payload.sources || [];
         // Resolve only once the queued audio has actually finished, so the pill
         // doesn't drop out of "speaking" while it is still talking.
-        playChain.then(() => finish(null, full)).catch(() => finish(null, full));
+        const done = () => finish(null, { text: full, sources });
+        playChain.then(done).catch(done);
       })
     );
     unlisteners.push(
@@ -314,6 +352,26 @@ function endTurn({ keepEvent = false } = {}) {
   cooldownUntil = Date.now() + t("mic.cooldown_ms");
   if (!keepEvent) clearEvent();
   phase = "idle";
+
+  // Conversation mode: hold the floor instead of making the user say the wake
+  // word again.
+  //
+  // The Stop button is the ONLY way out. Silence deliberately does not end it —
+  // going quiet re-arms the recorder, so pausing to think looks the same as
+  // leaving the room. That is what "keep listening until I press it" has to
+  // mean, and it is why there is no timeout here either.
+  //
+  // Safe to re-record immediately because TTS has already finished: finish()
+  // waits on playChain before resolving, so the reply cannot be picked up as
+  // the next question.
+  const conversing = t("voice.conversation") && !stopRequested;
+  if (!conversing) setConversing(false);
+  if (conversing) {
+    // Long-lived and refreshed each cycle rather than set once: pushEvent's own
+    // expiry would otherwise drop the pose out from under an open microphone.
+    pushEvent("conversing", 600000, { title: "Go ahead", sub: "still listening" });
+    runTurn();
+  }
 }
 
 const truncate = (text, max = 60) => {
@@ -410,6 +468,18 @@ window.addEventListener("DOMContentLoaded", () => {
   // into this one — the backend re-broadcasts the change and we react to it.
   // Same shape as signals.js: this module has no exports and is loaded purely
   // for these listeners.
+  // The only exit from conversation mode. Cancelling the recorder rather than
+  // just setting the flag makes it immediate: the handle resolves with no audio,
+  // which lands on runTurn's `!wav` path, and endTurn then sees stopRequested
+  // and stops instead of re-arming. Waiting for the current recording to end on
+  // its own would leave the microphone open for seconds after a deliberate stop.
+  document.getElementById("voice-stop-btn")?.addEventListener("click", () => {
+    stopRequested = true;
+    setConversing(false);
+    activeRecorder?.cancel();
+    clearEvent();
+  });
+
   listen("voice-settings-changed", () => {
     syncVoiceFromSettings();
   });

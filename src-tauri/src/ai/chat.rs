@@ -408,7 +408,12 @@ pub(crate) fn recent_voice_turns(
 }
 
 #[tauri::command]
-pub fn record_voice_turn(app: tauri::AppHandle, transcript: String, reply: String) -> Result<String, String> {
+pub fn record_voice_turn(
+    app: tauri::AppHandle,
+    transcript: String,
+    reply: String,
+    sources: Option<Vec<MessageSource>>,
+) -> Result<String, String> {
     let today = chrono::Local::now();
     let id = voice_chat_id(&today);
 
@@ -431,9 +436,12 @@ pub fn record_voice_turn(app: tauri::AppHandle, transcript: String, reply: Strin
         content: transcript,
         ts,
         source: "voice".to_string(),
-        // A spoken turn has no files attached to it, no picture and no sources:
-        // image generation is a typed command in the chat window, and the voice
-        // assistant answers without the web tools.
+        // A spoken turn still has no files and no picture — image generation is a
+        // typed command in the chat window. It CAN have sources now: the voice
+        // path gained the web tools (voice.allow_tools), and an answer that came
+        // from a page is worth being able to check afterwards, which is the whole
+        // reason the chat window shows them. They go on the ANSWER, not the
+        // question, same as the typed path.
         attachments: Vec::new(),
         image_path: String::new(),
         image_meta: String::new(),
@@ -447,7 +455,7 @@ pub fn record_voice_turn(app: tauri::AppHandle, transcript: String, reply: Strin
         attachments: Vec::new(),
         image_path: String::new(),
         image_meta: String::new(),
-        sources: Vec::new(),
+        sources: sources.unwrap_or_default(),
     });
 
     let saved = save_chat(app.clone(), chat);

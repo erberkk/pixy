@@ -541,28 +541,92 @@ pub async fn voice_reply_stream(window: tauri::Window, app: tauri::AppHandle, tu
             max_tokens: crate::tunables::int(&app, crate::tunables::VOICE_MAX_TOKENS) as u32,
             timeout_secs: crate::tunables::int(&app, crate::tunables::LLM_REPLY_TIMEOUT) as u64,
         };
-        let result = crate::ai::llm::run_chat_stream(
-            &endpoint,
-            &messages,
-            // No tools for the spoken path, deliberately. A tool round is a
-            // second full request — measured at ~19s on this machine's model —
-            // and a voice assistant that goes silent that long has failed at
-            // the one thing it is for. Typed chat pays that cost willingly.
-            &[],
-            &mut |delta| {
-                for sentence in splitter.push(delta) {
-                    let _ = window.emit(
-                        "voice-reply-sentence",
-                        json!({ "turn_id": &turn_id, "index": index, "text": sentence }),
-                    );
-                    index += 1;
-                }
-            },
-            // No cancellation on the spoken path: there is no Stop button to
-            // press, and a voice turn is short by construction (no tool rounds,
-            // capped tokens). The predicate exists for the typed chat.
-            &|| false,
-        );
+        // Tools on the spoken path cost a second full request — measured at ~19s
+        // on this machine's model — so this is a setting rather than a default.
+        // With it off the turn is exactly as fast as it always was; with it on
+        // the wait is covered by a spoken "let me look that up" (voice.js hears
+        // `voice-tool-start`), because the failure mode is unexplained silence,
+        // not slowness.
+        let offered: Vec<serde_json::Value> =
+            if crate::tunables::toggle(&app, crate::tunables::VOICE_ALLOW_TOOLS) {
+                crate::ai::tools::specs(&app).iter().map(|s| s.to_wire()).collect()
+            } else {
+                Vec::new()
+            };
+
+        // Which round we are on, for the ceiling below.
+        //
+        // Sentences are spoken as they arrive on EVERY round, including the
+        // first. An earlier version held round 0 back on the theory that a model
+        // about to call a tool streams a sentence of preamble first, and speaking
+        // that plus the real answer says it twice. That optimised the rare case
+        // and broke the common one: with tools offered and no tool actually
+        // called — which is most questions — the whole answer was suppressed and
+        // only the trailing fragment after the loop was ever heard. A model
+        // cannot be known to be calling a tool until it has finished streaming,
+        // so there is no way to hold the right round back. Occasionally saying a
+        // short preamble before "let me look that up" is the cheaper mistake.
+        let mut round = 0usize;
+        // Kept across rounds so a two-hop answer (search, then read a result)
+        // still lists both. Handed back with the reply rather than saved here:
+        // the webview owns when a turn is recorded (record_voice_turn), and
+        // splitting that decision would let a turn be stored twice.
+        let mut gathered: Vec<crate::ai::tools::ToolSource> = Vec::new();
+        let result = loop {
+            let outcome = crate::ai::llm::run_chat_stream(
+                &endpoint,
+                &messages,
+                &offered,
+                &mut |delta| {
+                    for sentence in splitter.push(delta) {
+                        let _ = window.emit(
+                            "voice-reply-sentence",
+                            json!({ "turn_id": &turn_id, "index": index, "text": sentence }),
+                        );
+                        index += 1;
+                    }
+                },
+                // No cancellation on the spoken path: there is no Stop button to
+                // press, and a voice turn is short by construction (capped
+                // tokens, and the tool rounds below are bounded). The predicate
+                // exists for the typed chat.
+                &|| false,
+            );
+
+            let outcome = match outcome {
+                Ok(outcome) => outcome,
+                Err(error) => break Err(error),
+            };
+            if outcome.calls.is_empty() {
+                break Ok(outcome);
+            }
+            // A model that keeps asking for tools would otherwise hold the
+            // microphone open forever. The typed path can be interrupted; this
+            // one cannot, so it gets a hard ceiling instead.
+            if round >= MAX_VOICE_TOOL_ROUNDS {
+                break Ok(outcome);
+            }
+
+            // Anything buffered belonged to the preamble, not to the answer.
+            splitter = SentenceSplitter::new(
+                crate::tunables::int(&app, crate::tunables::SPEECH_MIN_SENTENCE_CHARS) as usize,
+            );
+
+            messages.push(crate::ai::tools::assistant_call_message(&outcome.calls));
+            for call in &outcome.calls {
+                // What lets the widget say "let me look that up" and show the
+                // searching pose. Emitted before the call runs, because the
+                // whole point is to cover the seconds it takes.
+                let _ = window.emit(
+                    "voice-tool-start",
+                    json!({ "turn_id": &turn_id, "tool": &call.name }),
+                );
+                let ran = crate::ai::tools::execute(&app, call);
+                gathered.extend(ran.sources.iter().cloned());
+                messages.push(crate::ai::tools::tool_result_message(call, &ran.text));
+            }
+            round += 1;
+        };
 
         match result {
             Ok(full) => {
@@ -582,7 +646,10 @@ pub async fn voice_reply_stream(window: tauri::Window, app: tauri::AppHandle, tu
                     );
                     return;
                 }
-                let _ = window.emit("voice-reply-done", json!({ "turn_id": turn_id, "full_text": cleaned }));
+                let _ = window.emit(
+                    "voice-reply-done",
+                    json!({ "turn_id": turn_id, "full_text": cleaned, "sources": gathered }),
+                );
             }
             Err(error) => {
                 let _ = window.emit("voice-reply-error", json!({ "turn_id": turn_id, "error": error }));
@@ -592,6 +659,97 @@ pub async fn voice_reply_stream(window: tauri::Window, app: tauri::AppHandle, tu
     .await
 }
 
+/// How many tool rounds one spoken turn may take before it answers with what it
+/// has. Two is enough for "search, then read one result"; the ceiling exists
+/// because the spoken path has no Stop button to interrupt a model that keeps
+/// asking for one more lookup.
+const MAX_VOICE_TOOL_ROUNDS: usize = 2;
+
+/// Strips the markdown a model emits despite being told not to, so the speech
+/// server is never handed an asterisk to pronounce.
+///
+/// The delivery rules in VOICE_DELIVERY_RULES already ask for plain spoken
+/// language, and that ask is worth making — but it is a request, and models
+/// answer "here are a few Soulslike games: *Elden Ring*, *Lies of P*" anyway.
+/// Whoever is listening then hears the punctuation. A prompt cannot guarantee
+/// this; one pass over the string can.
+///
+/// Hand-rolled rather than a regex crate, for the same reason recall.rs folds
+/// text by hand: this is a handful of literal markers, not a grammar.
+///
+/// Asterisks are removed unconditionally — there is no sentence in which one is
+/// meant to be spoken. Underscores are only removed when doubled, because a
+/// single one is far more likely to be part of a name (`resolve_to_addrs`) than
+/// emphasis, and dropping it would change the word rather than clean it.
+fn speakable(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for raw in text.lines() {
+        let mut line = raw.trim();
+
+        // A fenced block has no spoken form at all. The fence lines go; whatever
+        // is inside stays, because silently swallowing content is worse than
+        // reading it a little awkwardly.
+        if line.starts_with("```") {
+            continue;
+        }
+
+        // Leading structure: heading hashes, quote arrows, bullet dashes. The
+        // trailing space is required for a bullet so a line that merely *starts*
+        // with emphasis is not mistaken for one.
+        loop {
+            let before = line;
+            line = line.trim_start_matches('#').trim_start();
+            if let Some(rest) = line.strip_prefix("> ") {
+                line = rest.trim_start();
+            }
+            for bullet in ["- ", "+ ", "* "] {
+                if let Some(rest) = line.strip_prefix(bullet) {
+                    line = rest.trim_start();
+                }
+            }
+            if line == before {
+                break;
+            }
+        }
+
+        let chars: Vec<char> = line.chars().collect();
+        let mut i = 0;
+        while i < chars.len() {
+            let c = chars[i];
+            // [label](url) keeps the label and drops the address: nobody wants a
+            // URL read out character by character.
+            if c == '[' {
+                if let Some(close) = chars[i..].iter().position(|c| *c == ']') {
+                    let label: String = chars[i + 1..i + close].iter().collect();
+                    let after = i + close + 1;
+                    if chars.get(after) == Some(&'(') {
+                        if let Some(end) = chars[after..].iter().position(|c| *c == ')') {
+                            out.push_str(&label);
+                            i = after + end + 1;
+                            continue;
+                        }
+                    }
+                }
+            }
+            match c {
+                '*' | '`' => {}
+                '~' if chars.get(i + 1) == Some(&'~') => {
+                    i += 2;
+                    continue;
+                }
+                '_' if chars.get(i + 1) == Some(&'_') => {
+                    i += 2;
+                    continue;
+                }
+                other => out.push(other),
+            }
+            i += 1;
+        }
+        out.push('\n');
+    }
+    out.trim().to_string()
+}
+
 /// Renders text to speech and hands the audio back for the webview to play.
 #[tauri::command]
 pub async fn voice_speak(app: tauri::AppHandle, text: String) -> Result<VoiceAudio, String> {
@@ -599,8 +757,10 @@ pub async fn voice_speak(app: tauri::AppHandle, text: String) -> Result<VoiceAud
         let profile = active_tts(&app).ok_or("No text-to-speech server is configured (Settings -> TTS).")?;
         let url = format!("{}/audio/speech", api_base(&profile.base_url));
 
+        // Cleaned here rather than at the caller: this is the only place text
+        // becomes audio, so it is the only place that can promise it.
         let mut payload = json!({
-            "input": text,
+            "input": speakable(&text),
             // WAV rather than the OpenAI default of MP3: every local server in
             // this space can emit WAV, and it needs no decoder work on our side.
             "response_format": "wav",
@@ -655,6 +815,66 @@ pub async fn voice_speak(app: tauri::AppHandle, text: String) -> Result<VoiceAud
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    /// The exact sentence that produced this function: a model told "no markdown"
+    /// emitted it anyway, and the speech server pronounced the asterisks.
+    #[test]
+    fn emphasis_markers_are_never_spoken() {
+        assert_eq!(
+            speakable("Here are a few Soulslike games: *Elden Ring*, *Lies of P*, and *Nioh 2*."),
+            "Here are a few Soulslike games: Elden Ring, Lies of P, and Nioh 2."
+        );
+        assert_eq!(speakable("that is **really** important"), "that is really important");
+        assert_eq!(speakable("call `resolve_to_addrs` first"), "call resolve_to_addrs first");
+        assert_eq!(speakable("~~wrong~~ right"), "wrong right");
+    }
+
+    /// An underscore is likelier to be part of a name than emphasis, and removing
+    /// it would change the word rather than clean it up.
+    #[test]
+    fn a_single_underscore_survives_because_it_is_probably_a_name() {
+        assert_eq!(speakable("the voice_allow_tools setting"), "the voice_allow_tools setting");
+        assert_eq!(speakable("__loud__ and clear"), "loud and clear");
+    }
+
+    #[test]
+    fn structure_markers_are_stripped_but_their_text_is_kept() {
+        assert_eq!(speakable("## Two options"), "Two options");
+        assert_eq!(speakable("- first
+- second"), "first
+second");
+        assert_eq!(speakable("> quoted thing"), "quoted thing");
+    }
+
+    /// A link is worth hearing by its label; its address is not.
+    #[test]
+    fn a_link_is_read_as_its_label() {
+        assert_eq!(
+            speakable("see [the setup guide](https://example.com/a/b) for that"),
+            "see the setup guide for that"
+        );
+        // A bracket that is not a link must survive untouched.
+        assert_eq!(speakable("array[0] is empty"), "array[0] is empty");
+    }
+
+    #[test]
+    fn a_fenced_block_loses_its_fences_and_keeps_its_body() {
+        assert_eq!(speakable("do this:
+```rust
+let x = 1;
+```"), "do this:
+let x = 1;");
+    }
+
+    /// Ordinary speech has to come through completely unchanged, or this function
+    /// is doing more harm than the asterisks it was written for.
+    #[test]
+    fn plain_speech_passes_through_untouched() {
+        let plain = "It is sixteen degrees in Istanbul and clear. Do you want the week?";
+        assert_eq!(speakable(plain), plain);
+    }
+
     use super::{api_base, build_system_prompt, clean_transcript, transcribe_endpoints, SentenceSplitter};
 
     // The minimum the fixtures below were written against. Pinned rather than

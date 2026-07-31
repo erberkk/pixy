@@ -31,6 +31,8 @@
    pixy.js) — gaming is deliberately excluded from automatic wiring but keeps
    its accent/pose here so Pixy.set('gaming') still works if invoked by hand. */
 #mascot[data-pixy-state="gaming"] { --a: #b06bff; }
+#mascot[data-pixy-state="searching"] { --a: #7fb3ff; }
+#mascot[data-pixy-state="conversing"] { --a: #6be0a8; }
 #mascot[data-pixy-state="juggling"] { --a: #55c8e0; }
 #mascot[data-pixy-state="forgotten"] { --a: #ff8a5c; }
 #mascot[data-pixy-state="review_requested"] { --a: #7ea8ff; }

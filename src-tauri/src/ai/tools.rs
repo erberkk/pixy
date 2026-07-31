@@ -72,13 +72,20 @@ pub fn specs(app: &tauri::AppHandle) -> Vec<ToolSpec> {
         // a product price) and then has to be told no. Naming them steers the
         // question toward what can be answered, and makes it likelier to
         // answer directly when searching would not help.
+        // The "for those, say you cannot look them up" this used to end with was
+        // measured doing real damage: asked for the top story on Hacker News, the
+        // model refused without calling anything — correctly, since HN was listed
+        // as a source AND as forbidden breaking news in the same sentence, and it
+        // resolved the contradiction the conservative way. Describing what each
+        // source is good at is useful; ordering a refusal is not, because the
+        // model cannot know that fetch_url could have answered it in one call.
         description:
             "Search the web for information you do not have. The sources are Marginalia \
              (independent web index — articles, blogs, documentation), Wikipedia, Stack \
-             Overflow, Hacker News discussions, crates.io and GitHub. Good for factual, \
-             technical and reference questions. It does NOT cover breaking news, prices, \
-             stock or weather — for those, say you cannot look them up. Pass a short \
-             keyword phrase, not a whole sentence.",
+             Overflow, Hacker News discussions, crates.io and GitHub. Best for factual, \
+             technical and reference questions. These are slow-crawled indexes, so they \
+             are weak on things that changed today — for a live page, fetch_url is the \
+             better tool. Pass a short keyword phrase, not a whole sentence.",
         parameters: json!({
             "type": "object",
             "required": ["query"],
@@ -96,11 +103,25 @@ pub fn specs(app: &tauri::AppHandle) -> Vec<ToolSpec> {
         // one thing it must not do (guess an address). Vague tool descriptions
         // are the main reason a small model calls the wrong tool or calls a
         // right one with nonsense in it.
+        //
+        // The blanket "never invent one" is now a narrow exception instead. It
+        // was costing the obvious cases: "what is on the front page of Hacker
+        // News" is one fetch of an address the model certainly knows, and the
+        // rule sent it to search — or to a refusal — instead. The exception is
+        // deliberately limited to a well-known site's own homepage, because that
+        // is where a model's guess is reliable; a deep link it reasons its way to
+        // is where it starts inventing paths that 404 and burn a round. A guessed
+        // address is no more dangerous than a given one either way: web/fetch.rs
+        // resolves it, refuses anything that is not a public address, and pins
+        // what it checked.
         description:
             "Fetch a web page and read its text. Use this whenever the user gives you a link, \
              or asks what is on a page, or asks about something you would need to read a \
-             specific page to answer. Only pass a URL that the user gave you or that appeared \
-             in an earlier tool result — never invent or guess one.",
+             specific page to answer — including anything that changed today, which the \
+             search index will not have. Prefer a URL the user gave you or one from an \
+             earlier tool result. You may also use the HOMEPAGE of a well-known site when \
+             the question is plainly about it (for example news.ycombinator.com for Hacker \
+             News), but do not invent deeper paths — guess the site, never the page.",
         parameters: json!({
             "type": "object",
             "required": ["url"],

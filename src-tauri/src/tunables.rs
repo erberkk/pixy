@@ -223,6 +223,24 @@ tunables! {
          already ends a reply you do not want.";
 
     // --- Spoken replies ------------------------------------------------------
+    VOICE_CONVERSATION = "voice.conversation", "Microphone",
+        "Keep listening after it answers", "",
+        Kind::Toggle { default: false },
+        restart: false,
+        "Normally every question starts with \"hey pixy\". With this on, the          microphone stays open after an answer so you can just keep talking, and          the conversation ends when you stop — go quiet for a moment and it goes          back to waiting for the wake word. Worth knowing what you are turning          on: between answers the microphone is genuinely open, which is the one          thing the wake word exists to avoid. The pill shows a distinct pose          while it is, so it cannot be left on by accident.";
+
+    VOICE_SEARCH_FILLER = "voice.search_filler", "Spoken replies",
+        "What it says before searching", "",
+        Kind::Text { default: "Let me look that up.", placeholder: "Let me look that up." },
+        restart: false,
+        "Spoken the moment a search starts, to cover the seconds it takes. Set it          in whatever language you talk to it in — this one line is written by the          app rather than the model, so it does not follow the reply's language on          its own. Leave it empty for silence.";
+
+    VOICE_ALLOW_TOOLS = "voice.allow_tools", "Spoken replies",
+        "Let spoken answers search the web", "",
+        Kind::Toggle { default: false },
+        restart: false,
+        "Off by default because it costs time, not because it costs privacy.          Answering from a search means a second round trip to the model —          measured at about nineteen seconds here — and a voice assistant that          goes quiet that long has failed at the one thing it is for. With this          on it says \"let me look that up\" first, so the wait is explained          rather than mysterious. Typed chat always searches; this is only about          the spoken path.";
+
     VOICE_MAX_TOKENS = "voice.max_tokens", "Spoken replies",
         "Reply length ceiling", "tokens",
         Kind::Int { min: 40, max: 2000, default: 220 },

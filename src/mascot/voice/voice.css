@@ -43,3 +43,42 @@
 .state-voice_error .pixy-text {
   display: none;
 }
+
+/* The way out of conversation mode. Hidden in every other state rather than
+   created on demand, so it cannot arrive a frame late in the one state where
+   the microphone is already open and the user wants it shut. */
+.voice-stop-btn {
+  display: none;
+  flex: 0 0 auto;
+  background: rgba(107, 224, 168, 0.14);
+  border: 1px solid rgba(107, 224, 168, 0.45);
+  color: #6be0a8;
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-family: -apple-system, "Segoe UI", sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+}
+
+.voice-stop-btn:hover {
+  background: rgba(107, 224, 168, 0.24);
+  color: #8ef0c0;
+}
+
+/* Keyed off the MODE, not the pose. Keying it to data-pixy-state="conversing"
+   was wrong twice over: endTurn pushes that pose and then runTurn immediately
+   pushes "hearing" over it, so it never survived a frame — and even if it had,
+   the button has to be reachable while the assistant is ANSWERING, which is
+   exactly when you want to cut it off. The class is set for as long as the
+   conversation is open, whatever the sprite is doing. */
+#mascot.in-conversation .voice-stop-btn {
+  display: inline-block;
+}
+
+/* The indicator and the button want the same slot; the button wins while it is
+   showing, because "how do I stop this" beats an animated equaliser. */
+#mascot.in-conversation .pixy-ind {
+  display: none;
+}
