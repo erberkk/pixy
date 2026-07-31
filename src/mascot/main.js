@@ -3,14 +3,21 @@
 // notice.js (state machine), github-notice.js, agent-notice.js, quick-menu.js.
 import { listen, currentWindow } from "../shared/tauri.js";
 import { cancelSpotifyPanel } from "./spotify/spotify.js";
-import { setState } from "./notice/notice.js";
+import { closePinnedCard, setState } from "./notice/notice.js";
+import { clearEvent } from "./pip/pipstate.js";
 import { reportHotRectSoon } from "./lib/hotrect.js";
 import {
-  closeGithubDigestNotice,
   showGithubDigestNotice,
   showGithubIssueNotice,
   showGithubMergeNotice,
 } from "./github/github-notice.js";
+import {
+  bindBriefClicks,
+  showAuthNeededNotice,
+  showCalendarNotice,
+  showDailyBrief,
+  showMailNotice,
+} from "./mail/mail-notice.js";
 import { showAgentPermissionNotice } from "./agent/agent-notice.js";
 import { hideMascot, hideQuickMenu, openSettings, openTerminal, openWorkspace } from "./quick-menu/quick-menu.js";
 
@@ -36,6 +43,27 @@ window.addEventListener("DOMContentLoaded", () => {
   listen("mascot-permission-request", (event) => {
     showAgentPermissionNotice(event.payload);
   });
+
+  listen("mail-new", (event) => {
+    showMailNotice(event.payload);
+  });
+
+  listen("calendar-soon", (event) => {
+    showCalendarNotice(event.payload);
+  });
+
+  listen("daily-brief", (event) => {
+    showDailyBrief(event.payload);
+  });
+
+  // The Google grant died — see google/oauth.rs. Surfaced rather than logged
+  // because the symptom otherwise is mail notices quietly stopping, which looks
+  // exactly like a quiet inbox.
+  listen("google-auth-needed", (event) => {
+    showAuthNeededNotice(event.payload);
+  });
+
+  bindBriefClicks();
 
   const mascotEl = document.getElementById("mascot");
   const quickMenu = document.getElementById("quick-menu");
@@ -102,8 +130,14 @@ window.addEventListener("DOMContentLoaded", () => {
     hideQuickMenu();
   });
 
-  document.getElementById("digest-close-btn").addEventListener("click", () => {
-    closeGithubDigestNotice();
+  // One button for every pinned card (GitHub digest, morning brief) — it closes
+  // whichever is showing and hands the screen to anything queued behind it.
+  document.getElementById("card-close-btn").addEventListener("click", () => {
+    closePinnedCard();
+    // The morning brief holds its pip pose for as long as it is up (see
+    // signals.js), so closing it has to release that too or the postman would
+    // stay on the pill for half an hour after the card is gone.
+    clearEvent();
   });
 
   document.addEventListener("click", (e) => {

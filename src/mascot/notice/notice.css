@@ -52,6 +52,8 @@
 .state-waiting_input .pip-row,
 .state-github_merge .pip-row,
 .state-github_digest .pip-row,
+.state-mail_notice .pip-row,
+.state-mail_brief .pip-row,
 .state-agent_permission .pip-row {
   grid-column: 1;
   grid-row: 1 / -1;
@@ -62,8 +64,10 @@
 .state-waiting_input .notice,
 .state-github_merge .notice,
 .state-github_digest .notice,
+.state-mail_notice .notice,
+.state-mail_brief .notice,
 .state-agent_permission .notice,
-.digest-close-btn {
+.card-close-btn {
   grid-column: 2;
 }
 
@@ -71,28 +75,65 @@
 .state-waiting_input .pip-ind,
 .state-github_merge .pip-ind,
 .state-github_digest .pip-ind,
+.state-mail_notice .pip-ind,
+.state-mail_brief .pip-ind,
 .state-agent_permission .pip-ind,
 .state-waiting_permission .pip-text,
 .state-waiting_input .pip-text,
 .state-github_merge .pip-text,
 .state-github_digest .pip-text,
+.state-mail_notice .pip-text,
+.state-mail_brief .pip-text,
 .state-agent_permission .pip-text {
   display: none;
 }
 
-/* github_digest is the one state with TWO stacked content rows (the
-   scrollable list, then the pinned Close button below it) — everything
-   else only ever has one. */
-.state-github_digest #mascot {
+/* The pinned-card states are the ones with TWO stacked content rows (the
+   scrollable list, then the Close button below it) — every other state only
+   ever has one. */
+.state-github_digest #mascot,
+.state-mail_brief #mascot {
   grid-template-rows: 1fr auto;
 }
 
-.state-github_digest .notice {
+.state-github_digest .notice,
+.state-mail_brief .notice {
   grid-row: 1;
 }
 
-.state-github_digest .digest-close-btn {
+.state-github_digest .card-close-btn,
+.state-mail_brief .card-close-btn {
   grid-row: 2;
+}
+
+/* There is exactly one Close button in the DOM and every pinned card reuses it
+   (see closePinnedCard), so its appearance lives here rather than with either
+   card. Only the display toggle above and the hover accent are per-state — each
+   card tints it to match its own header. */
+.card-close-btn {
+  display: none;
+  flex: 0 0 auto;
+  background: #262626;
+  border: 1px solid #444;
+  color: #ddd;
+  border-radius: 8px;
+  padding: 5px 16px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.state-github_digest .card-close-btn,
+.state-mail_brief .card-close-btn {
+  display: block;
+  /* Its own row in the grid puts it directly under the card's last line with
+     nothing between them, so it read as part of the content rather than as the
+     way out of it. The gap is what separates "the card" from "the button". */
+  margin-top: 14px;
+}
+
+.card-close-btn:hover {
+  background: #333;
 }
 
 /* Dynamic-Island-style subtle hover feedback while idle. Uses filter/border,

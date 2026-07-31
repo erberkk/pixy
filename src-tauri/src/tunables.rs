@@ -210,6 +210,18 @@ tunables! {
         "How long to wait for the text-to-speech server before giving up. Worth \
          raising on a machine where synthesis runs on the CPU.";
 
+    LLM_REPLY_TIMEOUT = "llm.reply_timeout_secs", "Chat",
+        "Give up on a reply after", "seconds",
+        Kind::Int { min: 30, max: 3600, default: 900 },
+        restart: false,
+        "How long one reply may take from start to finish. This is a total, not a \
+         gap between tokens, so a long answer counts against it even while it is \
+         arriving normally. It was fixed at 120 and that was too short for images: \
+         measured here, asking a 9B vision model about one screenshot took 166 \
+         seconds and the reply was cut off with an unhelpful stream error. Lower it \
+         only if you would rather a stuck server gave up sooner — the Stop button \
+         already ends a reply you do not want.";
+
     // --- Spoken replies ------------------------------------------------------
     VOICE_MAX_TOKENS = "voice.max_tokens", "Spoken replies",
         "Reply length ceiling", "tokens",
@@ -428,6 +440,17 @@ tunables! {
          better only up to a point — around 20-30 for most models, and as few as 4 \
          for the 'turbo' and 'schnell' variants, which will look burnt at 24.";
 
+    IMAGE_SEED = "image.seed", "Images",
+        "Seed", "",
+        Kind::Int { min: -1, max: 2147483647, default: -1 },
+        restart: false,
+        "The number the picture is built from. -1 draws a different one every \
+         time; any other value pins it, so the same prompt gives back the same \
+         picture. Set this to a seed printed under a result you liked to get that \
+         result again, or to explore what one word changes while everything else \
+         stays put. Only servers with stable-diffusion.cpp's own API take a seed \
+         — the seed is not shown when the picture came from a generic one.";
+
     IMAGE_NEGATIVE_PROMPT = "image.negative_prompt", "Images",
         "Always avoid", "",
         Kind::Text { default: "blurry, low detail, deformed, extra limbs, watermark, text", placeholder: "blurry, watermark" },
@@ -450,6 +473,112 @@ tunables! {
          does: your conversation is not sent anywhere by this. Sources used are \
          free ones that need no account, and turning this off removes the tools \
          entirely rather than just hiding them.";
+
+    // --- Mail ----------------------------------------------------------------
+    //
+    // There is deliberately no "mail.enabled" switch: the feature is on exactly
+    // when an account is connected in Settings, the same rule the GitHub
+    // integration already follows with its token. A second switch would only
+    // create a state where everything is configured and nothing happens.
+    MAIL_POLL = "mail.poll_secs", "Mail",
+        "Check for new mail every", "s",
+        Kind::Int { min: 60, max: 3600, default: 120 },
+        restart: false,
+        "How often the inbox is polled. Gmail's quota is generous enough that \
+         this is really a question of how soon you want to know, not of cost.";
+
+    MAIL_NOTIFY_NEW = "mail.notify_new", "Mail",
+        "Announce new mail as it arrives", "",
+        Kind::Toggle { default: true },
+        restart: false,
+        "Turn this off to keep the morning summary but stop the individual \
+         pop-ups — the connection and the daily card are unaffected.";
+
+    MAIL_MAX_NOTICES = "mail.max_notices_per_poll", "Mail",
+        "Most pop-ups at once", "",
+        Kind::Int { min: 1, max: 20, default: 3 },
+        restart: false,
+        "When more mail than this arrives between two checks, it collapses into \
+         one \"12 new messages\" notice instead of queueing twelve. Without a cap, \
+         coming back to a full inbox means the widget beeps at you for a minute.";
+
+    MAIL_MUTE_SENDERS = "mail.mute_senders", "Mail",
+        "Never announce mail from", "",
+        Kind::Names { default: "noreply,no-reply,newsletter,notifications" },
+        restart: false,
+        "Comma-separated. Any sender address containing one of these is skipped \
+         for pop-ups. A reply to something you sent is announced anyway — you \
+         asked someone a question, so their answer matters even if their address \
+         looks automated.";
+
+    MAIL_SUMMARIZE_MIN_CHARS = "mail.summarize_min_chars", "Mail",
+        "Summarize mail longer than", "characters",
+        Kind::Int { min: 200, max: 20000, default: 800 },
+        restart: false,
+        "Below this a message goes through untouched — its subject line already \
+         says what a summary would. Only longer mail is worth a model's time.";
+
+    MAIL_SUMMARY_TIMEOUT = "mail.summary_timeout_secs", "Mail",
+        "Give up summarizing after", "s",
+        Kind::Int { min: 5, max: 120, default: 25 },
+        restart: false,
+        "The notice waits for the summary rather than appearing and then changing \
+         under you, so this is also how late a notice can be. Past it, the message \
+         is shown with its opening lines instead — never nothing.";
+
+    MAIL_LOCAL_MODELS_ONLY = "mail.local_models_only", "Mail",
+        "Only summarize mail with a local model", "",
+        Kind::Toggle { default: true },
+        restart: false,
+        "Summarizing means sending the message body to whichever LLM profile is \
+         active, and that profile can be switched to a hosted one at any time — \
+         so this guards against what a later change might do, not against today. \
+         With it on, a non-local profile simply skips the summary: mail notices \
+         and the daily card still work, showing the message's opening lines \
+         instead of a summary.";
+
+    MAIL_BRIEF_DAYS = "mail.brief_days", "Mail",
+        "Morning card looks back", "days",
+        Kind::Int { min: 1, max: 90, default: 7 },
+        restart: false,
+        "How far back the morning card counts as still waiting for you. Both the \
+         listed messages and the unread total obey it, so the number and the rows \
+         describe the same week. Without a window the total is whatever Gmail's \
+         own all-time counter says — 18,600 in one mailbox here, almost all of it \
+         years old, which answers a question nobody asked. Raise it if you go \
+         through mail less often than weekly.";
+
+    MAIL_BRIEF_HOUR = "mail.brief_hour", "Mail",
+        "Morning summary after", "o'clock",
+        Kind::Int { min: 0, max: 23, default: 9 },
+        restart: false,
+        "Local hour the once-a-day mail and meeting card is allowed to appear. If \
+         the GitHub digest is already on screen this one waits its turn rather \
+         than being lost.";
+
+    // --- Calendar ------------------------------------------------------------
+    CALENDAR_POLL = "calendar.poll_secs", "Calendar",
+        "Check the calendar every", "s",
+        Kind::Int { min: 60, max: 3600, default: 300 },
+        restart: false,
+        "Keep this comfortably shorter than the reminder lead time below, or an \
+         event can be added and then start again between two checks.";
+
+    CALENDAR_REMIND_MINUTES = "calendar.remind_minutes", "Calendar",
+        "Warn before a meeting starts", "min",
+        Kind::Int { min: 1, max: 120, default: 10 },
+        restart: false,
+        "How far ahead the widget says something is about to start. Each \
+         occurrence is announced once, so a daily standup does not re-fire every \
+         time the calendar is polled.";
+
+    CALENDAR_INCLUDE_ALL_DAY = "calendar.include_all_day", "Calendar",
+        "Also warn about all-day entries", "",
+        Kind::Toggle { default: false },
+        restart: false,
+        "Off, because an all-day entry starts at midnight — with this on, every \
+         birthday and public holiday on your calendar wakes the widget up in the \
+         middle of the night. They still appear in the morning summary either way.";
 
     // --- GitHub --------------------------------------------------------------
     GITHUB_DIGEST_HOUR = "github.digest_hour", "GitHub",
@@ -569,11 +698,23 @@ pub fn text(app: &tauri::AppHandle, id: &str) -> String {
         .to_string()
 }
 
-// There is deliberately no `names` reader here yet: both tunables of that kind
-// are read by the frontend, which takes its values from the get_tunables
-// payload. The kind is fully described and validated below, so adding a reader
-// is a few lines the day Rust first needs one — but an unused one today is just
-// dead code.
+/// A `Names` list, already split and lowercased, ready to match against.
+///
+/// This reader did not exist while both lists of that kind were read only by the
+/// frontend; the mail watcher's muted-senders list is the first one Rust itself
+/// has to match on. Values are normalized on save too (see `validate`), so this
+/// re-splits an already-clean string — cheap, and it keeps the reader correct for
+/// a config.json edited by hand.
+pub fn names(app: &tauri::AppHandle, id: &str) -> Vec<String> {
+    let default = match spec(id).kind {
+        Kind::Names { default } => default,
+        _ => "",
+    };
+    let raw = override_value(app, id)
+        .and_then(|v| v.as_str().map(str::to_string))
+        .unwrap_or_else(|| default.to_string());
+    split_names(&raw)
+}
 
 /// Splits a `Names` value into lowercase substrings, dropping empties so a stray
 /// trailing comma can't produce a pattern that matches everything.

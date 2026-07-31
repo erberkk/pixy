@@ -11,370 +11,596 @@
   <body>
     <div id="titlebar" data-tauri-drag-region>
       <span id="titlebar-title" data-tauri-drag-region>Settings</span>
-      <button class="titlebar-btn" id="titlebar-close" title="Close">
+      <!-- Filled in by setupNav: which section is open, kept visible after the
+           section's own heading has scrolled off. -->
+      <span id="titlebar-crumb" data-tauri-drag-region></span>
+      <button class="titlebar-btn" id="titlebar-close" title="Close (Esc)">
         <svg viewBox="0 0 10 10"><path d="M0 0l10 10M10 0L0 10" stroke="currentColor" stroke-width="1"/></svg>
       </button>
     </div>
 
     <div class="hub">
-      <nav class="hub-sidebar">
-        <button class="hub-nav-item active" data-section="llm">
+      <!-- Grouped rather than one flat run of eight: the four AI services, the
+           two accounts and the two machine-level sections are different kinds
+           of thing, and the labels say so without any extra clicks. -->
+      <nav class="hub-sidebar" role="tablist" aria-label="Settings sections">
+        <span class="nav-group-label">Models</span>
+        <button class="hub-nav-item active" data-section="llm" role="tab" aria-selected="true" aria-controls="section-llm">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09a1.65 1.65 0 00-1-1.51 1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09a1.65 1.65 0 001.51-1 1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
           <span>LLM</span>
         </button>
-        <button class="hub-nav-item" data-section="github">
-          <svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.57.1.79-.25.79-.55 0-.27-.01-1.16-.02-2.11-3.2.7-3.88-1.36-3.88-1.36-.52-1.33-1.28-1.68-1.28-1.68-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.18 1.76 1.18 1.03 1.76 2.7 1.25 3.36.96.1-.75.4-1.25.73-1.54-2.55-.29-5.23-1.28-5.23-5.68 0-1.25.45-2.28 1.18-3.08-.12-.29-.51-1.46.11-3.04 0 0 .96-.31 3.15 1.18a10.9 10.9 0 015.74 0c2.19-1.49 3.15-1.18 3.15-1.18.62 1.58.23 2.75.11 3.04.74.8 1.18 1.83 1.18 3.08 0 4.41-2.69 5.38-5.25 5.67.42.36.78 1.07.78 2.16 0 1.56-.01 2.82-.01 3.2 0 .31.21.66.8.55A10.99 10.99 0 0023.5 12C23.5 5.65 18.35.5 12 .5z"/></svg>
-          <span>GitHub</span>
-        </button>
-        <button class="hub-nav-item" data-section="stt">
+        <button class="hub-nav-item" data-section="stt" role="tab" aria-selected="false" aria-controls="section-stt">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2M12 19v4M8 23h8"/></svg>
-          <span>STT</span>
+          <span>Speech to text</span>
         </button>
-        <button class="hub-nav-item" data-section="tts">
+        <button class="hub-nav-item" data-section="tts" role="tab" aria-selected="false" aria-controls="section-tts">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M15.5 8.5a5 5 0 010 7M19 5a10 10 0 010 14"/></svg>
-          <span>TTS</span>
+          <span>Text to speech</span>
         </button>
-        <button class="hub-nav-item" data-section="voice">
+        <button class="hub-nav-item" data-section="voice" role="tab" aria-selected="false" aria-controls="section-voice">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12h2l2-5 2 10 2-13 2 16 2-13 2 10 2-5h2"/></svg>
           <span>Voice</span>
         </button>
-        <button class="hub-nav-item" data-section="memory">
+        <button class="hub-nav-item" data-section="images" role="tab" aria-selected="false" aria-controls="section-images">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+          <span>Images</span>
+        </button>
+
+        <span class="nav-group-label">Accounts</span>
+        <button class="hub-nav-item" data-section="github" role="tab" aria-selected="false" aria-controls="section-github">
+          <svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.57.1.79-.25.79-.55 0-.27-.01-1.16-.02-2.11-3.2.7-3.88-1.36-3.88-1.36-.52-1.33-1.28-1.68-1.28-1.68-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.18 1.76 1.18 1.03 1.76 2.7 1.25 3.36.96.1-.75.4-1.25.73-1.54-2.55-.29-5.23-1.28-5.23-5.68 0-1.25.45-2.28 1.18-3.08-.12-.29-.51-1.46.11-3.04 0 0 .96-.31 3.15 1.18a10.9 10.9 0 015.74 0c2.19-1.49 3.15-1.18 3.15-1.18.62 1.58.23 2.75.11 3.04.74.8 1.18 1.83 1.18 3.08 0 4.41-2.69 5.38-5.25 5.67.42.36.78 1.07.78 2.16 0 1.56-.01 2.82-.01 3.2 0 .31.21.66.8.55A10.99 10.99 0 0023.5 12C23.5 5.65 18.35.5 12 .5z"/></svg>
+          <span>GitHub</span>
+        </button>
+        <button class="hub-nav-item" data-section="google" role="tab" aria-selected="false" aria-controls="section-google">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z"/><path d="m22 6-10 7L2 6"/></svg>
+          <span>Mail</span>
+        </button>
+
+        <span class="nav-group-label">This machine</span>
+        <button class="hub-nav-item" data-section="memory" role="tab" aria-selected="false" aria-controls="section-memory">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3a4 4 0 00-4 4v1a3 3 0 00-3 3v2a3 3 0 003 3v1a4 4 0 008 0v-1a3 3 0 003-3v-2a3 3 0 00-3-3V7a4 4 0 00-4-4z"/><path d="M12 3v18M8 8h1M15 8h1M8 16h1M15 16h1"/></svg>
           <span>Memory</span>
         </button>
-        <button class="hub-nav-item" data-section="advanced">
+        <button class="hub-nav-item" data-section="advanced" role="tab" aria-selected="false" aria-controls="section-advanced">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg>
           <span>Advanced</span>
         </button>
       </nav>
 
       <div class="hub-content">
-        <section class="hub-section active" id="section-llm">
-          <p class="hint">
-            Connect to any OpenAI-compatible local runtime — Ollama, LM Studio,
-            llama.cpp server, and similar. Add more than one profile to switch
-            between models from the Chat window's model picker.
-          </p>
+        <!-- ---------------------------------------------------------------- -->
+        <section class="hub-section active" id="section-llm" role="tabpanel" aria-label="LLM">
+          <header class="sec-head">
+            <h2>Language model</h2>
+            <p>
+              Connect to any OpenAI-compatible local runtime — Ollama, LM Studio,
+              llama.cpp server, and similar. Add more than one profile to switch
+              between models from the Chat window's model picker.
+            </p>
+          </header>
 
-          <div class="llm-profile-list" id="llmProfileList"></div>
-          <button class="btn small" id="newProfileBtn">+ New profile</button>
-
-          <div class="panel-divider"></div>
-
-          <label class="field">
-            <span>Profile name</span>
-            <input id="profileLabel" placeholder="Local Ollama" />
-          </label>
-
-          <label class="field">
-            <span>Base URL</span>
-            <input id="baseUrl" placeholder="http://localhost:11434/v1" />
-          </label>
-
-          <label class="field">
-            <span>Model name</span>
-            <input id="model" placeholder="qwen3.5:9b" />
-          </label>
-
-          <label class="field">
-            <span>API Key <em>(optional)</em></span>
-            <input id="apiKey" type="password" placeholder="—" />
-          </label>
-
-          <div class="field-row">
-            <label class="field" style="flex: 1;">
-              <span>Max tokens</span>
-              <input id="maxTokens" type="number" min="50" step="50" placeholder="600" />
-            </label>
-            <label class="switch-row" style="flex: 1;">
-              <span>Allow model thinking/reasoning</span>
-              <span class="switch">
-                <input type="checkbox" id="think" />
-                <span class="switch-track"><span class="switch-thumb"></span></span>
-              </span>
-            </label>
-          </div>
-          <p class="hint subtle">
-            Sent as Ollama&rsquo;s <em>think</em> flag on servers that have its native
-            API, and as <em>reasoning_effort</em> everywhere else. Models that don&rsquo;t
-            accept either one ignore it &mdash; and a reasoning model reasons whether
-            this is on or off, so switching it off is a request rather than a
-            guarantee.
-          </p>
-
-          <div class="status" id="llmStatus"></div>
-
-          <div class="actions">
-            <button class="btn" id="llmTestBtn">Test connection</button>
-            <button class="btn" id="deleteProfileBtn">Delete profile</button>
-            <button class="btn primary" id="llmSaveBtn">Save profile</button>
-          </div>
-
-          <div class="panel-divider"></div>
-
-          <label class="switch-row">
-            <span>Auto-start a local server when the widget launches</span>
-            <span class="switch">
-              <input type="checkbox" id="autostart" />
-              <span class="switch-track"><span class="switch-thumb"></span></span>
-            </span>
-          </label>
-
-          <label class="field" id="startCommandField">
-            <span>Start command</span>
-            <input id="startCommand" placeholder="ollama serve" />
-          </label>
-
-          <div class="actions">
-            <button class="btn" id="llmStartNowBtn">Start now</button>
-          </div>
-        </section>
-
-        <section class="hub-section" id="section-github">
-          <p class="hint">
-            Needs a fine-grained (or classic) personal access token — read
-            access to Issues, Pull requests, and Metadata is enough.
-          </p>
-
-          <label class="field">
-            <span>Personal Access Token</span>
-            <input id="token" type="password" placeholder="github_pat_…" />
-          </label>
-
-          <div class="status" id="githubStatus"></div>
-
-          <div class="actions">
-            <button class="btn" id="githubTestBtn">Test connection</button>
-            <button class="btn primary" id="githubSaveBtn">Save</button>
-          </div>
-
-          <div class="panel-divider"></div>
-
-          <div class="report-head">
-            <span class="report-updated" id="reportUpdated"></span>
-            <button class="btn small" id="refreshBtn">Refresh</button>
-          </div>
-
-          <div class="report-error" id="reportError"></div>
-
-          <div class="report-section">
-            <h4>Assigned to me</h4>
-            <div class="report-list" id="issuesList"></div>
-          </div>
-
-          <div class="report-section">
-            <h4>My pull requests</h4>
-            <div class="report-list" id="prsList"></div>
-          </div>
-        </section>
-
-        <section class="hub-section" id="section-stt">
-          <p class="hint">
-            Speech-to-text connection profiles. Not wired to anything yet —
-            this just holds connection details ahead of that feature.
-          </p>
-
-          <div class="llm-profile-list" id="sttProfileList"></div>
-          <button class="btn small" id="sttNewProfileBtn">+ New profile</button>
-
-          <div class="panel-divider"></div>
-
-          <label class="field">
-            <span>Profile name</span>
-            <input id="sttProfileLabel" placeholder="Local Whisper" />
-          </label>
-
-          <label class="field">
-            <span>Base URL</span>
-            <input id="sttBaseUrl" placeholder="http://localhost:9000" />
-          </label>
-
-          <label class="field">
-            <span>Model name</span>
-            <input id="sttModel" placeholder="whisper-1" />
-          </label>
-
-          <label class="field">
-            <span>Spoken language <em>(optional)</em></span>
-            <input id="sttLanguage" placeholder="tr" maxlength="8" />
-          </label>
-          <p class="hint subtle">
-            Two-letter code &mdash; <em>tr</em>, <em>en</em>, <em>de</em>&hellip; Leave empty to let the
-            server detect it. Worth filling in for anything but English: detection
-            only gets about a second of speech to go on and leans heavily English,
-            so a Turkish sentence can come back as confident English nonsense.
-          </p>
-
-          <label class="field">
-            <span>API Key <em>(optional)</em></span>
-            <input id="sttApiKey" type="password" placeholder="—" />
-          </label>
-
-          <div class="status" id="sttStatus"></div>
-
-          <div class="actions">
-            <button class="btn" id="sttDeleteProfileBtn">Delete profile</button>
-            <button class="btn primary" id="sttSaveBtn">Save profile</button>
-          </div>
-
-          <div class="panel-divider"></div>
-
-          <label class="switch-row">
-            <span>Auto-start a local server when the widget launches</span>
-            <span class="switch">
-              <input type="checkbox" id="sttAutostart" />
-              <span class="switch-track"><span class="switch-thumb"></span></span>
-            </span>
-          </label>
-
-          <label class="field">
-            <span>Start command</span>
-            <input id="sttStartCommand" placeholder="whisper-server.exe -m ggml-large-v3-turbo.bin" />
-          </label>
-
-          <div class="actions">
-            <button class="btn" id="sttStartNowBtn">Start now</button>
-          </div>
-        </section>
-
-        <section class="hub-section" id="section-tts">
-          <p class="hint">
-            Text-to-speech connection profiles. Not wired to anything yet —
-            this just holds connection details ahead of that feature.
-          </p>
-
-          <div class="llm-profile-list" id="ttsProfileList"></div>
-          <button class="btn small" id="ttsNewProfileBtn">+ New profile</button>
-
-          <div class="panel-divider"></div>
-
-          <label class="field">
-            <span>Profile name</span>
-            <input id="ttsProfileLabel" placeholder="Local Piper" />
-          </label>
-
-          <label class="field">
-            <span>Base URL</span>
-            <input id="ttsBaseUrl" placeholder="http://localhost:5002" />
-          </label>
-
-          <label class="field">
-            <span>Model name</span>
-            <input id="ttsModel" placeholder="tts-1" />
-          </label>
-
-          <label class="field">
-            <span>Voice</span>
-            <input id="ttsVoice" placeholder="alloy" />
-          </label>
-
-          <label class="field">
-            <span>API Key <em>(optional)</em></span>
-            <input id="ttsApiKey" type="password" placeholder="—" />
-          </label>
-
-          <div class="status" id="ttsStatus"></div>
-
-          <div class="actions">
-            <button class="btn" id="ttsDeleteProfileBtn">Delete profile</button>
-            <button class="btn primary" id="ttsSaveBtn">Save profile</button>
-          </div>
-
-          <div class="panel-divider"></div>
-
-          <label class="switch-row">
-            <span>Auto-start a local server when the widget launches</span>
-            <span class="switch">
-              <input type="checkbox" id="ttsAutostart" />
-              <span class="switch-track"><span class="switch-thumb"></span></span>
-            </span>
-          </label>
-
-          <label class="field">
-            <span>Start command</span>
-            <input id="ttsStartCommand" placeholder="python server.py" />
-          </label>
-
-          <div class="actions">
-            <button class="btn" id="ttsStartNowBtn">Start now</button>
-          </div>
-        </section>
-
-        <section class="hub-section" id="section-voice">
-          <p class="hint">
-            Say <strong>&ldquo;Hey Pixy&rdquo;</strong> while the widget is running and it
-            records you, transcribes what you said, answers with the active LLM
-            profile and reads the answer back. Uses the STT and TTS profiles from
-            the sections above &mdash; all three have to be configured.
-          </p>
-
-          <div class="voice-readiness" id="voiceReadiness"></div>
-
-          <label class="switch-row">
-            <span>Listen for the wake word</span>
-            <span class="switch">
-              <input type="checkbox" id="voiceEnabled" />
-              <span class="switch-track"><span class="switch-thumb"></span></span>
-            </span>
-          </label>
-          <p class="hint subtle">
-            While this is on, the microphone stays open so the wake word can be
-            heard. Nothing is recorded or sent anywhere until it fires.
-          </p>
-
-          <div class="panel-divider"></div>
-
-          <label class="field">
-            <span>Wake-word sensitivity</span>
-            <div class="slider-row">
-              <input type="range" id="voiceThreshold" min="0.05" max="0.95" step="0.05" />
-              <output id="voiceThresholdOut"></output>
+          <div class="card">
+            <div class="card-head">
+              <h3>Profiles</h3>
+              <button class="btn small" id="newProfileBtn">+ New profile</button>
             </div>
-          </label>
-          <p class="hint subtle">
-            Lower is more sensitive: it catches the wake word more often, and
-            also fires on things that only sound like it. Raise it if it triggers
-            by itself; lower it if it keeps missing you.
-          </p>
-        </section>
-
-        <section class="hub-section" id="section-memory">
-          <p class="hint">
-            Conversations you have already had, made findable from the ones you
-            have next. Ask about something discussed last week and the relevant
-            part of it is quietly added to your question &mdash; typed or spoken,
-            either one can reach the other. Nothing is added when nothing is
-            relevant, which is most of the time.
-          </p>
-
-          <div class="memory-status" id="memoryStatus"></div>
-
-          <div class="actions">
-            <button class="btn" id="memoryReindexBtn">Rebuild index</button>
+            <div class="llm-profile-list" id="llmProfileList"></div>
           </div>
 
-          <div class="panel-divider"></div>
+          <div class="card">
+            <div class="card-head">
+              <h3>Connection</h3>
+            </div>
+            <div class="card-body">
+              <label class="field">
+                <span>Profile name</span>
+                <input id="profileLabel" placeholder="Local Ollama" />
+              </label>
+
+              <label class="field">
+                <span>Base URL</span>
+                <input id="baseUrl" placeholder="http://localhost:11434/v1" />
+              </label>
+
+              <div class="field-row">
+                <label class="field">
+                  <span>Model name</span>
+                  <input id="model" placeholder="qwen3.5:9b" />
+                </label>
+                <label class="field">
+                  <span>Max tokens</span>
+                  <input id="maxTokens" type="number" min="50" step="50" placeholder="600" />
+                </label>
+              </div>
+
+              <label class="field">
+                <span>API Key <em>(optional)</em></span>
+                <span class="input-wrap"><input id="apiKey" type="password" placeholder="—" /></span>
+              </label>
+
+              <div class="panel-divider"></div>
+
+              <label class="switch-row">
+                <span class="switch-copy">
+                  <span>Allow model thinking/reasoning</span>
+                  <span class="hint subtle">
+                    Sent as Ollama&rsquo;s <em>think</em> flag on servers that have its native
+                    API, and as <em>reasoning_effort</em> everywhere else. Models that don&rsquo;t
+                    accept either one ignore it &mdash; and a reasoning model reasons whether
+                    this is on or off, so switching it off is a request rather than a
+                    guarantee.
+                  </span>
+                </span>
+                <span class="switch">
+                  <input type="checkbox" id="think" />
+                  <span class="switch-track"><span class="switch-thumb"></span></span>
+                </span>
+              </label>
+
+              <div class="status" id="llmStatus"></div>
+            </div>
+            <div class="card-foot">
+              <button class="btn danger" id="deleteProfileBtn">Delete profile</button>
+              <button class="btn" id="llmTestBtn">Test connection</button>
+              <button class="btn primary" id="llmSaveBtn">Save profile</button>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-head">
+              <h3>Local server</h3>
+            </div>
+            <div class="card-body">
+              <label class="switch-row">
+                <span class="switch-copy">
+                  <span>Auto-start when the widget launches</span>
+                  <span class="hint subtle">
+                    Nothing is started if the base URL above already answers.
+                  </span>
+                </span>
+                <span class="switch">
+                  <input type="checkbox" id="autostart" />
+                  <span class="switch-track"><span class="switch-thumb"></span></span>
+                </span>
+              </label>
+
+              <label class="field" id="startCommandField">
+                <span>Start command</span>
+                <input id="startCommand" placeholder="ollama serve" />
+              </label>
+            </div>
+            <div class="card-foot right">
+              <button class="btn" id="llmStartNowBtn">Start now</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- ---------------------------------------------------------------- -->
+        <section class="hub-section" id="section-stt" role="tabpanel" aria-label="Speech to text">
+          <header class="sec-head">
+            <h2>Speech to text</h2>
+            <p>
+              Where spoken audio goes to be transcribed. Used by the Voice
+              section&rsquo;s wake word, and by dictation in the Chat window.
+            </p>
+          </header>
+
+          <div class="card">
+            <div class="card-head">
+              <h3>Profiles</h3>
+              <button class="btn small" id="sttNewProfileBtn">+ New profile</button>
+            </div>
+            <div class="llm-profile-list" id="sttProfileList"></div>
+          </div>
+
+          <div class="card">
+            <div class="card-head">
+              <h3>Connection</h3>
+            </div>
+            <div class="card-body">
+              <label class="field">
+                <span>Profile name</span>
+                <input id="sttProfileLabel" placeholder="Local Whisper" />
+              </label>
+
+              <label class="field">
+                <span>Base URL</span>
+                <input id="sttBaseUrl" placeholder="http://localhost:9000" />
+              </label>
+
+              <div class="field-row">
+                <label class="field">
+                  <span>Model name</span>
+                  <input id="sttModel" placeholder="whisper-1" />
+                </label>
+                <label class="field">
+                  <span>Language <em>(optional)</em></span>
+                  <input id="sttLanguage" placeholder="tr" maxlength="8" />
+                </label>
+              </div>
+              <p class="hint subtle">
+                Two-letter code &mdash; <em>tr</em>, <em>en</em>, <em>de</em>&hellip; Leave empty to let the
+                server detect it. Worth filling in for anything but English: detection
+                only gets about a second of speech to go on and leans heavily English,
+                so a Turkish sentence can come back as confident English nonsense.
+              </p>
+
+              <label class="field">
+                <span>API Key <em>(optional)</em></span>
+                <span class="input-wrap"><input id="sttApiKey" type="password" placeholder="—" /></span>
+              </label>
+
+              <div class="status" id="sttStatus"></div>
+            </div>
+            <div class="card-foot">
+              <button class="btn danger" id="sttDeleteProfileBtn">Delete profile</button>
+              <button class="btn primary" id="sttSaveBtn">Save profile</button>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-head">
+              <h3>Local server</h3>
+            </div>
+            <div class="card-body">
+              <label class="switch-row">
+                <span class="switch-copy">
+                  <span>Auto-start when the widget launches</span>
+                  <span class="hint subtle">
+                    Nothing is started if the base URL above already answers.
+                  </span>
+                </span>
+                <span class="switch">
+                  <input type="checkbox" id="sttAutostart" />
+                  <span class="switch-track"><span class="switch-thumb"></span></span>
+                </span>
+              </label>
+
+              <label class="field">
+                <span>Start command</span>
+                <input id="sttStartCommand" placeholder="whisper-server.exe -m ggml-large-v3-turbo.bin" />
+              </label>
+            </div>
+            <div class="card-foot right">
+              <button class="btn" id="sttStartNowBtn">Start now</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- ---------------------------------------------------------------- -->
+        <section class="hub-section" id="section-tts" role="tabpanel" aria-label="Text to speech">
+          <header class="sec-head">
+            <h2>Text to speech</h2>
+            <p>
+              The voice the widget answers in. Used when the wake word starts a
+              spoken conversation.
+            </p>
+          </header>
+
+          <div class="card">
+            <div class="card-head">
+              <h3>Profiles</h3>
+              <button class="btn small" id="ttsNewProfileBtn">+ New profile</button>
+            </div>
+            <div class="llm-profile-list" id="ttsProfileList"></div>
+          </div>
+
+          <div class="card">
+            <div class="card-head">
+              <h3>Connection</h3>
+            </div>
+            <div class="card-body">
+              <label class="field">
+                <span>Profile name</span>
+                <input id="ttsProfileLabel" placeholder="Local Piper" />
+              </label>
+
+              <label class="field">
+                <span>Base URL</span>
+                <input id="ttsBaseUrl" placeholder="http://localhost:5002" />
+              </label>
+
+              <div class="field-row">
+                <label class="field">
+                  <span>Model name</span>
+                  <input id="ttsModel" placeholder="tts-1" />
+                </label>
+                <label class="field">
+                  <span>Voice</span>
+                  <input id="ttsVoice" placeholder="alloy" />
+                </label>
+              </div>
+
+              <label class="field">
+                <span>API Key <em>(optional)</em></span>
+                <span class="input-wrap"><input id="ttsApiKey" type="password" placeholder="—" /></span>
+              </label>
+
+              <div class="status" id="ttsStatus"></div>
+            </div>
+            <div class="card-foot">
+              <button class="btn danger" id="ttsDeleteProfileBtn">Delete profile</button>
+              <button class="btn primary" id="ttsSaveBtn">Save profile</button>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-head">
+              <h3>Local server</h3>
+            </div>
+            <div class="card-body">
+              <label class="switch-row">
+                <span class="switch-copy">
+                  <span>Auto-start when the widget launches</span>
+                  <span class="hint subtle">
+                    Nothing is started if the base URL above already answers.
+                  </span>
+                </span>
+                <span class="switch">
+                  <input type="checkbox" id="ttsAutostart" />
+                  <span class="switch-track"><span class="switch-thumb"></span></span>
+                </span>
+              </label>
+
+              <label class="field">
+                <span>Start command</span>
+                <input id="ttsStartCommand" placeholder="python server.py" />
+              </label>
+            </div>
+            <div class="card-foot right">
+              <button class="btn" id="ttsStartNowBtn">Start now</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- ---------------------------------------------------------------- -->
+        <section class="hub-section" id="section-voice" role="tabpanel" aria-label="Voice">
+          <header class="sec-head">
+            <h2>Voice</h2>
+            <p>
+              Say <strong>&ldquo;Hey Pixy&rdquo;</strong> while the widget is running and it
+              records you, transcribes what you said, answers with the active LLM
+              profile and reads the answer back. Uses the STT and TTS profiles from
+              the sections above &mdash; all three have to be configured.
+            </p>
+          </header>
+
+          <div class="card">
+            <div class="card-head">
+              <h3>What it needs</h3>
+            </div>
+            <div class="voice-readiness" id="voiceReadiness"></div>
+          </div>
+
+          <div class="card">
+            <div class="card-body">
+              <label class="switch-row">
+                <span class="switch-copy">
+                  <span>Listen for the wake word</span>
+                  <span class="hint subtle">
+                    While this is on, the microphone stays open so the wake word can be
+                    heard. Nothing is recorded or sent anywhere until it fires.
+                  </span>
+                </span>
+                <span class="switch">
+                  <input type="checkbox" id="voiceEnabled" />
+                  <span class="switch-track"><span class="switch-thumb"></span></span>
+                </span>
+              </label>
+
+              <div class="panel-divider"></div>
+
+              <label class="field">
+                <span>Wake-word sensitivity</span>
+                <div class="slider-row">
+                  <input type="range" id="voiceThreshold" min="0.05" max="0.95" step="0.05" />
+                  <output id="voiceThresholdOut"></output>
+                </div>
+              </label>
+              <p class="hint subtle">
+                Lower is more sensitive: it catches the wake word more often, and
+                also fires on things that only sound like it. Raise it if it triggers
+                by itself; lower it if it keeps missing you.
+              </p>
+            </div>
+          </div>
+        </section>
+
+        <!-- ---------------------------------------------------------------- -->
+        <section class="hub-section" id="section-github" role="tabpanel" aria-label="GitHub">
+          <header class="sec-head">
+            <h2>GitHub</h2>
+            <p>
+              Needs a fine-grained (or classic) personal access token — read
+              access to Issues, Pull requests, and Metadata is enough.
+            </p>
+          </header>
+
+          <div class="card">
+            <div class="card-body">
+              <label class="field">
+                <span>Personal Access Token</span>
+                <span class="input-wrap"><input id="token" type="password" placeholder="github_pat_…" /></span>
+              </label>
+
+              <div class="status" id="githubStatus"></div>
+            </div>
+            <div class="card-foot right">
+              <button class="btn" id="githubTestBtn">Test connection</button>
+              <button class="btn primary" id="githubSaveBtn">Save</button>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-head">
+              <h3>Waiting on you</h3>
+              <span class="report-updated" id="reportUpdated"></span>
+              <button class="btn small" id="refreshBtn">Refresh</button>
+            </div>
+
+            <div class="report-error" id="reportError"></div>
+
+            <div class="report-section">
+              <h4>Assigned to me</h4>
+              <div class="report-list" id="issuesList"></div>
+            </div>
+
+            <div class="report-section">
+              <h4>My pull requests</h4>
+              <div class="report-list" id="prsList"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ---------------------------------------------------------------- -->
+        <section class="hub-section" id="section-google" role="tabpanel" aria-label="Mail">
+          <header class="sec-head">
+            <h2>Mail &amp; calendar</h2>
+            <p>
+              Connects Gmail and Google Calendar, read-only, for arriving-mail
+              notices and the morning brief. It uses an OAuth client you create
+              once in your own Google Cloud console — nothing is shared with, or
+              routed through, anyone else.
+            </p>
+          </header>
+
+          <div class="card">
+            <div class="card-head">
+              <h3>OAuth client</h3>
+            </div>
+            <div class="card-body">
+              <p class="hint">
+                In console.cloud.google.com: create a project, enable the Gmail API
+                and the Google Calendar API, then under Credentials create an OAuth
+                client ID of type <em>Desktop app</em>. Paste its two values below.
+                On the consent screen, add yourself as a test user.
+              </p>
+
+              <label class="field">
+                <span>Client ID</span>
+                <input id="googleClientId" placeholder="…apps.googleusercontent.com" />
+              </label>
+
+              <label class="field">
+                <span>Client secret</span>
+                <span class="input-wrap"><input id="googleClientSecret" type="password" placeholder="GOCSPX-…" /></span>
+              </label>
+
+              <div class="status" id="googleStatus"></div>
+            </div>
+            <div class="card-foot right">
+              <button class="btn primary" id="googleSaveBtn">Save client</button>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-head">
+              <h3>Mailboxes</h3>
+              <button class="btn primary small" id="googleAddAccountBtn">+ Add account</button>
+            </div>
+            <div class="llm-profile-list" id="googleAccountList"></div>
+            <div class="card-body">
+              <p class="hint subtle">
+                One client, any number of mailboxes — the client above is the app's
+                identity, not yours. Add a personal and a work account and each gets
+                its own sign-in; notices and the morning card then say which inbox
+                they came from.
+              </p>
+              <p class="hint subtle">
+                While your consent screen is in "Testing", Google expires the sign-in
+                after seven days and the widget will ask you to connect again. Moving
+                it to "In production" — no review needed for your own use — avoids
+                that.
+              </p>
+            </div>
+          </div>
+        </section>
+
+        <!-- ---------------------------------------------------------------- -->
+        <!-- Images. Its own section rather than a heading buried in Advanced,
+             where it was: this is a local server you have to install and point
+             at, exactly like Speech to text is, and Advanced is where you go to
+             adjust something you already have working. -->
+        <section class="hub-section" id="section-images" role="tabpanel" aria-label="Images">
+          <header class="sec-head">
+            <h2>Images</h2>
+            <p>
+              Where <code>/image</code> in the Chat window sends a description. A
+              local drawing server &mdash; stable-diffusion.cpp&rsquo;s
+              <em>sd-server</em> is the one this was built against; it needs no
+              account and no key. Nothing here talks to anything off this machine.
+            </p>
+          </header>
+
+          <div class="card">
+            <div class="card-head">
+              <h3>Local server</h3>
+              <button class="btn small" id="imageStartNowBtn">Start now</button>
+            </div>
+            <div class="card-body">
+              <p class="hint subtle">
+                Started automatically when the widget launches, if a start command
+                is set below and nothing already answers at the address. A model of
+                several GB takes a few seconds to load before the first picture.
+              </p>
+              <div class="status" id="imageStatus"></div>
+            </div>
+          </div>
+
+          <!-- The same generated rows as Advanced, filtered to this group: one
+               schema (src-tauri/src/tunables.rs), one renderer, two places to
+               show them. Same arrangement the Memory section uses. -->
+          <div id="imageTunables"></div>
+
+          <div class="status" id="imageSettingsStatus"></div>
+
+          <div class="actions">
+            <button class="btn primary" id="imageSaveBtn">Save</button>
+          </div>
+        </section>
+
+        <section class="hub-section" id="section-memory" role="tabpanel" aria-label="Memory">
+          <header class="sec-head">
+            <h2>Memory</h2>
+            <p>
+              Conversations you have already had, made findable from the ones you
+              have next. Ask about something discussed last week and the relevant
+              part of it is quietly added to your question &mdash; typed or spoken,
+              either one can reach the other. Nothing is added when nothing is
+              relevant, which is most of the time.
+            </p>
+          </header>
+
+          <div class="card">
+            <div class="card-head">
+              <h3>What&rsquo;s indexed</h3>
+              <button class="btn small" id="memoryReindexBtn">Rebuild index</button>
+            </div>
+            <div class="memory-status" id="memoryStatus"></div>
+          </div>
 
           <!-- Where the conversation files themselves live. Here rather than in
                Advanced because it is a path, not a number, and because it is the
                thing everything above is an index over. -->
-          <div class="field">
-            <span>Conversation files</span>
-            <p class="hint subtle">
-              One JSON file per conversation. Move them somewhere you back up if
-              you want to keep them &mdash; the files come with you. The search
-              index stays with the app either way, since it is only a cache and
-              is rebuilt from these files.
-            </p>
-            <div class="chats-dir-row">
-              <code id="chatsDirPath"></code>
-              <button class="btn small" id="chatsDirChangeBtn">Change&hellip;</button>
-              <button class="btn small" id="chatsDirResetBtn" hidden>Reset</button>
+          <div class="card">
+            <div class="card-head">
+              <h3>Conversation files</h3>
+            </div>
+            <div class="card-body">
+              <p class="hint subtle">
+                One JSON file per conversation. Move them somewhere you back up if
+                you want to keep them &mdash; the files come with you. The search
+                index stays with the app either way, since it is only a cache and
+                is rebuilt from these files.
+              </p>
+              <div class="chats-dir-row">
+                <code id="chatsDirPath"></code>
+                <button class="btn small" id="chatsDirChangeBtn">Change&hellip;</button>
+                <button class="btn small" id="chatsDirResetBtn" hidden>Reset</button>
+              </div>
+              <div class="status" id="chatsDirStatus"></div>
             </div>
           </div>
-          <div class="status" id="chatsDirStatus"></div>
-
-          <div class="panel-divider"></div>
 
           <!-- The same generated rows as the Advanced section, filtered to this
                group: one schema (src-tauri/src/tunables.rs), one renderer, two
@@ -388,13 +614,17 @@
           </div>
         </section>
 
-        <section class="hub-section" id="section-advanced">
-          <p class="hint">
-            Values that depend on your machine rather than on the widget &mdash; your
-            room&rsquo;s noise, your speech server&rsquo;s speed, how long you have to be
-            away before the mascot thinks you left. Every one of them has a
-            working default, so nothing here needs touching to get started.
-          </p>
+        <!-- ---------------------------------------------------------------- -->
+        <section class="hub-section" id="section-advanced" role="tabpanel" aria-label="Advanced">
+          <header class="sec-head">
+            <h2>Advanced</h2>
+            <p>
+              Values that depend on your machine rather than on the widget &mdash; your
+              room&rsquo;s noise, your speech server&rsquo;s speed, how long you have to be
+              away before the mascot thinks you left. Every one of them has a
+              working default, so nothing here needs touching to get started.
+            </p>
+          </header>
 
           <!-- Rendered from the schema the backend sends (src-tauri/src/tunables.rs),
                not written out by hand: a settings form kept in sync manually is a
@@ -403,8 +633,8 @@
 
           <div class="status" id="advancedStatus"></div>
 
-          <div class="actions">
-            <button class="btn" id="advancedResetBtn">Reset all to defaults</button>
+          <div class="actions spread">
+            <button class="btn danger" id="advancedResetBtn">Reset all to defaults</button>
             <button class="btn primary" id="advancedSaveBtn">Save</button>
           </div>
         </section>

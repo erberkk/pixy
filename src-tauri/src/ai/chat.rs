@@ -38,6 +38,11 @@ pub struct MessageAttachment {
     /// Characters the file had before any cap, so the card can say it was cut.
     #[serde(default)]
     pub full_chars: usize,
+    /// Where an attached image was written (images::save_attached_image). Empty
+    /// for text attachments, whose content is in `text`, and for images attached
+    /// before this existed — which are the ones whose cards open nothing.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub path: String,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -68,6 +73,31 @@ pub struct ChatMessage {
     /// generation time because it cannot be recovered from the file later.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub image_meta: String,
+    /// The web pages this turn was answered from, shown as links under the reply.
+    ///
+    /// Saved, unlike the recall note beside it in the UI. The two look alike but
+    /// point at different things: a recall note names an earlier conversation,
+    /// which is still in the app and findable by search, so losing the note loses
+    /// little. These name pages outside it, and nothing else records which ones
+    /// were read — so a reopened chat showed factual claims with their citations
+    /// stripped off, which is the exact "did the model make this up" problem the
+    /// sources exist to answer. A few short URLs per answer is a cheap thing to
+    /// carry for that.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sources: Vec<MessageSource>,
+}
+
+/// One page shown under a reply.
+///
+/// Structurally the same as tools::ToolSource today, and deliberately not that
+/// type: this one is part of the on-disk chat format, and reusing the tool
+/// module's would mean a change made for tooling reasons silently rewrote what
+/// every saved conversation is expected to contain. Nothing converts between
+/// them — the round trip is through the frontend as JSON.
+#[derive(Serialize, Deserialize, Clone)]
+pub struct MessageSource {
+    pub title: String,
+    pub url: String,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -401,11 +431,13 @@ pub fn record_voice_turn(app: tauri::AppHandle, transcript: String, reply: Strin
         content: transcript,
         ts,
         source: "voice".to_string(),
-        // A spoken turn has no files attached to it, and no picture: image
-        // generation is a typed command in the chat window.
+        // A spoken turn has no files attached to it, no picture and no sources:
+        // image generation is a typed command in the chat window, and the voice
+        // assistant answers without the web tools.
         attachments: Vec::new(),
         image_path: String::new(),
         image_meta: String::new(),
+        sources: Vec::new(),
     });
     chat.messages.push(ChatMessage {
         role: "assistant".to_string(),
@@ -415,6 +447,7 @@ pub fn record_voice_turn(app: tauri::AppHandle, transcript: String, reply: Strin
         attachments: Vec::new(),
         image_path: String::new(),
         image_meta: String::new(),
+        sources: Vec::new(),
     });
 
     let saved = save_chat(app.clone(), chat);

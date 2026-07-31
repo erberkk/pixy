@@ -18,7 +18,9 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon"] }
+# "image-png" is for the tray icon: it is a PNG rendered from the mascot's own
+# pip sprite (icons/tray.png), and Image::from_bytes cannot decode one without it.
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
@@ -33,6 +35,12 @@ uuid = { version = "1", features = ["v4"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "blocking", "multipart", "rustls-tls", "gzip"] }
 chrono = "0.4"
 base64 = "0.22"
+# PKCE's S256 challenge for the Google sign-in flow (google/oauth.rs), and
+# nothing else. The alternative Google also accepts, code_challenge_method=plain,
+# would have needed no dependency at all — but it sends the verifier itself in
+# the authorization request, which is exactly the interception PKCE exists to
+# stop. A hashing crate is cheaper than reasoning about whether that matters.
+sha2 = "0.10"
 # "bundled" compiles SQLite from source into the binary rather than linking
 # whatever the machine happens to have — the point of this whole design is that
 # a user installs nothing extra, and it also guarantees FTS5 is compiled in

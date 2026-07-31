@@ -5,7 +5,7 @@
 import { invoke } from "../../shared/tauri.js";
 import { beep } from "../lib/sound.js";
 import { reportHotRectSoon } from "../lib/hotrect.js";
-import { clearRevertTimer, lockNotice, unlockNotice } from "../notice/notice.js";
+import { clearRevertTimer, closePinnedCard, lockNotice } from "../notice/notice.js";
 import { refreshAmbient } from "../pip/signals.js";
 
 // Whatever the hook chose to call itself, for the card header. `?label=` in the
@@ -312,8 +312,10 @@ export function showAgentPermissionNotice({ session_id, request_id, tool_name, t
 function finishResolvedPermission(requestId) {
   pendingPermissions = pendingPermissions.filter((p) => p.request_id !== requestId);
   if (pendingPermissions.length === 0) {
-    unlockNotice();
-    document.body.className = "state-idle";
+    // Not a plain unlockNotice(): this card preempts whatever was on screen, so
+    // on the way out it has to hand the area to anything that queued up behind
+    // it rather than just going idle (see closePinnedCard).
+    closePinnedCard();
   } else {
     renderPermissionList();
   }

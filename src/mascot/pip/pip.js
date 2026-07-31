@@ -46,6 +46,23 @@ const ART = {
   gamepad: [".ooooooo.", "o.k...b.o", "okkk.bbbo", "o.k...b.o", ".ooooooo."],
   batt: ["ooooooo", "o.....o", "o.....o", "o.....o", "ooooooo"],
   bubble: [".oooo.", "o....o", "o....o", "o....o", ".oo.o.", "..o..."],
+  // The mail states' own props (see the postman poses in draw()). Held items are
+  // five columns wide and no more: the canvas ends at x=23 and the body already
+  // reaches x+13, so six would be clipped. Checked on screen at 11x, not guessed.
+  //
+  // Dark band across the top for the flap, white below for the paper. A V-shaped
+  // flap was tried first and read as an X — five pixels is not enough width to
+  // draw a diagonal that says "envelope" instead of "cross".
+  envelope: ["oooooo", "okkkko", "owwwwo", "owwwwo", "oooooo"],
+  // Two of the same stacked, for the morning card: a whole delivery rather than
+  // one message. Tried as a satchel first, which at this size was just a striped
+  // box — repeating a shape that already reads is better than inventing one that
+  // doesn't.
+  mailStack: ["oooooo", "okkkko", "owwwwo", "oooooo", "okkkko", "owwwwo", "oooooo"],
+  // A peaked cap. The last row is the peak, deliberately asymmetric — it sticks
+  // out only on the side the face looks towards. A symmetric band read as a
+  // beanie, which is a different character entirely.
+  postCap: ["...aaaaaa...", ".aaaaaaaaaa.", "oooooooooooo", "ooooo......."],
 };
 
 // 8x3 faces drawn inside the visor
@@ -101,6 +118,13 @@ export const PIP_META = {
   assigned: { ind: "check", title: "Assigned", sub: "new issue for you" },
   digest_ready: { ind: "check", title: "Digest ready", sub: "daily summary waiting" },
   welcome_back: { ind: "check", title: "Welcome back", sub: "here's what happened" },
+  // Mail and calendar (mail/watcher.rs, calendar/watcher.rs). These get their
+  // own postman poses rather than borrowing happy/digest_ready, so mail is
+  // recognisable at a glance without reading the text beside it.
+  mail_new: { ind: "check", title: "New mail", sub: "just arrived" },
+  mail_reply: { ind: "check", title: "You got a reply", sub: "someone answered you" },
+  brief_ready: { ind: "check", title: "Morning brief", sub: "mail and meetings" },
+  meeting_soon: { ind: "bang", title: "Meeting soon", sub: "starting shortly" },
   // Chat window's own assistant persona (chat.js) — always rendered in a
   // fixed muted grey (see workspace's chat.css .chat-mascot --a override) rather
   // than picking up a colored accent like every other state here, so it
@@ -342,6 +366,27 @@ function draw() {
       face = "happy";
       blinks = false;
       break;
+    // A brisk two-step walk rather than the idle float — a postman arriving.
+    case "mail_new":
+    case "brief_ready":
+      by += [0, 0, -1, -1][t % 4];
+      dx = [0, 0, 1, 1][t % 4];
+      armY = 3; // arm up, holding the envelope out
+      faceDx = 1; // looking at you as they hand it over
+      break;
+    // The one kind of mail you were already waiting on, so it hops like happy.
+    case "mail_reply":
+      by += [0, -2, -2, -1, 0, 0][t % 6];
+      face = "happy";
+      blinks = false;
+      armY = 3;
+      break;
+    case "meeting_soon":
+      dx = [0, 1][t % 2];
+      by += [0, -1][Math.floor(t / 2) % 2];
+      face = "wide";
+      blinks = false;
+      break;
     case "chat_idle":
       by += [0, 0, 0, -1, -1, -1, 0, 0][t % 8];
       faceDx = t % 61 < 8 ? 1 : t % 89 < 6 ? -1 : 0;
@@ -375,7 +420,7 @@ function draw() {
       blit(ART.note, 21, 13 - p - i, null);
     }
   }
-  if (s === "happy" || s === "mentioned" || s === "assigned" || s === "digest_ready" || s === "welcome_back") {
+  if (s === "happy" || s === "mentioned" || s === "assigned" || s === "digest_ready" || s === "welcome_back" || s === "mail_reply") {
     for (let i = 0; i < 7; i++) {
       const p = (t * 2 + i * 3) % 22;
       px(1 + Math.floor(rnd(i) * 22), p, i % 2 ? pal.b : pal.a);
@@ -394,7 +439,11 @@ function draw() {
 
   // antenna
   const pulse =
-    s === "alert" || s === "forgotten" ? t % 2 === 0 : s === "sleeping" ? t % 10 < 5 : t % 8 < 4;
+    s === "alert" || s === "forgotten" || s === "meeting_soon"
+      ? t % 2 === 0
+      : s === "sleeping"
+        ? t % 10 < 5
+        : t % 8 < 4;
   box(x + 6, by - 1, 2, 1, pal.o);
   blit(ART.bulb, x + 5, by - 5, pulse ? null : { b: "d" });
 
@@ -544,6 +593,26 @@ function draw() {
       break;
     case "alert":
       blit(ART.sign, x + 12, by + 1, null);
+      break;
+    // The postman: cap on the head for all three, and either an envelope (one
+    // message) or the satchel (a morning's worth) held up beside it.
+    case "mail_new":
+    case "mail_reply":
+    case "brief_ready": {
+      // Four rows now (crown, crown, band, peak), so it starts one row higher
+      // than a three-row cap would and still lands its band on the head.
+      blit(ART.postCap, x + 1, by - 4, null);
+      const held = s === "brief_ready" ? ART.mailStack : ART.envelope;
+      // Six columns wide, so it starts one pixel inside the body's right edge
+      // (x+13) rather than clear of it — which is also what makes it look held
+      // rather than floating. Rides the body's bob so arm and cargo stay together.
+      blit(held, x + 13, by + 1 + armRy, null);
+      break;
+    }
+    case "meeting_soon":
+      // The hourglass already in this sprite set, reused: a meeting about to
+      // start is the same "time is running out" idea it was drawn for.
+      blit(t % 4 < 2 ? ART.hourA : ART.hourB, x + 14, by + 3, null);
       break;
     case "chat_idle":
       blit(ART.bubble, x + 12, by + 1, null);

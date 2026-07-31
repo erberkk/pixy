@@ -4,9 +4,12 @@
 // per-machine values that groups read instead of hardcoding.
 mod agent;
 mod ai;
+mod calendar;
 mod config;
 mod content;
 mod github;
+mod google;
+mod mail;
 mod system;
 mod tunables;
 mod ui;
@@ -23,10 +26,13 @@ use ai::chat::{
     choose_chats_dir, delete_chat, get_chat_instructions, get_chats_dir, list_chats, load_chat,
     pick_chat_attachment, record_voice_turn, reset_chats_dir, save_chat, save_chat_instructions,
 };
-use ai::images::{generate_image, open_generated_image, read_generated_image};
+use ai::images::{
+    generate_image, open_generated_image, read_generated_image, save_attached_image,
+    start_image_server_now,
+};
 use ai::llm::{
-    get_llm_settings, get_model_capabilities, save_llm_settings, send_chat_message,
-    set_active_llm_profile, start_server_now, test_llm_connection,
+    cancel_chat_message, get_llm_settings, get_model_capabilities, save_llm_settings,
+    send_chat_message, set_active_llm_profile, start_server_now, test_llm_connection,
 };
 use ai::recall::{recall_context, recall_reindex, recall_status, search_chats};
 use ai::speech::{get_stt_settings, get_tts_settings, save_stt_settings, save_tts_settings};
@@ -38,6 +44,10 @@ use content::notes::{choose_notes_dir, delete_note, get_notes_dir, list_notes, o
 use github::{
     get_github_config, get_github_report, open_in_browser, save_github_config,
     test_github_connection,
+};
+use google::oauth::{
+    get_google_client, google_add_account, google_remove_account, google_status,
+    save_google_client,
 };
 use system::media::{
     is_mic_capture_active, list_audio_sessions, set_session_muted, set_session_volume, spotify_get_state,
@@ -120,10 +130,13 @@ pub fn run() {
             get_model_capabilities,
             generate_image,
             read_generated_image,
+            save_attached_image,
+            start_image_server_now,
             open_generated_image,
             save_llm_settings,
             set_active_llm_profile,
             send_chat_message,
+            cancel_chat_message,
             list_chats,
             load_chat,
             save_chat,
@@ -150,6 +163,11 @@ pub fn run() {
             save_github_config,
             test_github_connection,
             get_github_report,
+            google_add_account,
+            google_remove_account,
+            google_status,
+            save_google_client,
+            get_google_client,
             open_in_browser,
             set_hot_rect,
             set_click_through_paused,
@@ -237,6 +255,12 @@ pub fn run() {
             github::start_daily_digest_watcher(app.handle().clone());
             github::issue_watcher::start_issue_watcher(app.handle().clone());
             github::ci_watcher::start_ci_watcher(app.handle().clone());
+
+            // Both no-op until an account is connected in Settings, so they cost
+            // one config read per poll on an install that never sets Google up.
+            mail::watcher::start_mail_watcher(app.handle().clone());
+            mail::brief::start_brief_watcher(app.handle().clone());
+            calendar::watcher::start_calendar_watcher(app.handle().clone());
 
             system::media::start_spotify_watcher(app.handle().clone());
 

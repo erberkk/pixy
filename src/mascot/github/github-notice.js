@@ -6,13 +6,7 @@ import { invoke } from "../../shared/tauri.js";
 import { buildIconSvg, buildStrokeIcon } from "../lib/icons.js";
 import { beep } from "../lib/sound.js";
 import { reportHotRectSoon } from "../lib/hotrect.js";
-import {
-  clearRevertTimer,
-  isNoticeLocked,
-  lockNotice,
-  showTransientNotice,
-  unlockNotice,
-} from "../notice/notice.js";
+import { isNoticeLocked, showPinnedCard, showTransientNotice } from "../notice/notice.js";
 
 const MERGE_ICON_PATH =
   "M5.45 5.154A4.25 4.25 0 0 0 9.25 7.5h1.378a2.251 2.251 0 1 1 0 1.5H9.25A5.734 5.734 0 0 1 5 7.123v3.505a2.25 2.25 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.95-.218ZM4.25 13.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM3.5 3.75a.75.75 0 1 1 1.5 0 .75.75 0 0 1-1.5 0Zm8.5.75a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5Z";
@@ -173,17 +167,15 @@ function renderDigestList(container, summary) {
 // up until the user clicks the dedicated Close button, and noticeLocked
 // blocks every other state change (setState/merge notice) from touching it
 // in the meantime.
+//
+// Goes through showPinnedCard rather than taking the lock itself, so that if the
+// morning mail brief is already up this waits behind it instead of being
+// silently dropped by the isNoticeLocked() guard. The beep lives inside the
+// render callback for the same reason: a card that was queued must not announce
+// itself until it is actually on screen.
 export function showGithubDigestNotice(summary) {
-  clearRevertTimer();
-  lockNotice();
-  document.body.className = "state-github_digest";
-  renderDigestList(document.getElementById("notice"), summary);
-  beep({ freq: 600, duration: 0.15, gain: 0.15 });
-  reportHotRectSoon();
-}
-
-export function closeGithubDigestNotice() {
-  unlockNotice();
-  document.body.className = "state-idle";
-  reportHotRectSoon();
+  showPinnedCard("state-github_digest", (notice) => {
+    renderDigestList(notice, summary);
+    beep({ freq: 600, duration: 0.15, gain: 0.15 });
+  });
 }

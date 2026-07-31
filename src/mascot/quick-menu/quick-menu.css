@@ -1,89 +1,131 @@
-/* Right-click quick menu (see quick-menu.js). */
+/* Right-click quick menu (see quick-menu.js): round icon buttons that fan out
+   from the pill along a shallow arc, instead of the OS's default rectangular
+   context menu or a plain row.
 
-/* Right-click quick menu: round icon buttons that fan out below the pill
-   along a shallow arc, instead of the OS's default rectangular context menu
-   or a plain row. Each item is positioned individually (nth-child) rather
-   than via flex, since a fan-out only makes sense with known fixed
-   positions per item — not a generic layout that grows with more items. */
+   Nothing here is a fixed number tuned to one state. hotrect.js measures the
+   pill on every state change and on right-click and publishes its box as
+   --pill-top/-bottom/-center/-width; the fan's anchor, its item size, its
+   spread and its curve are all derived from those below. The pill ranges from a
+   66px circle to a 620px card, and a fan sized for the middle of that range
+   looks oversized on the circle and like a stranded cluster under the card.
+
+   Each button carries two numbers of its own: --o, its signed slot on the arc
+   (-1 / 0 / +1 for three items, -1.5..+1.5 for four), and --rise, how far the
+   arc lifts it above the centre item (0 at the centre, 1 at the ends). Adding a
+   fourth item is one more button with its own pair — there is no item count to
+   keep in sync here and no nth-child chain to renumber. */
 #quick-menu {
   position: absolute;
-  /* Anchored just under the pill's live bottom edge, which hotrect.js measures
-     and publishes as --pill-bottom on every state change. The pill's height
-     varies by state (46px bar / 66px resting circle / 90px waiting panel), so a
-     fixed offset here would only ever look right in one of them.
-     Each item is 34px tall and centred on this anchor (translate -50%) before
-     its own downward fan offset, so anchoring 4px above the pill's edge leaves
-     the outer items tucked ~3px behind it — the fan reads as opening out from
-     under the pill rather than floating detached below.
-     The fallback matches the resting circle, for the first paint before
-     hotrect.js has run. */
-  top: calc(var(--pill-bottom, 74px) - 4px);
-  left: 50%;
+  /* Centred on the pill rather than on the window: the two agree today (body
+     centres #mascot) but the menu should follow the pill if that ever stops
+     being true. */
+  left: var(--pill-center, 50%);
   width: 0;
   height: 0;
   z-index: 10;
+
+  --pw: var(--pill-width, 210px);
+
+  /* Item diameter, and the distance between item centres. Both grow with the
+     pill and then stop: a 29px button is as small as a comfortable click
+     target gets, and past ~36px the fan starts competing with the pill it
+     belongs to. */
+  --qm-size: clamp(29px, calc(var(--pw) * 0.16), 36px);
+  --qm-gap: calc(var(--qm-size) + clamp(6px, calc(var(--pw) * 0.045), 20px));
+
+  /* How far the centre item sits from the anchor, and how much higher the outer
+     items sit. The curve flattens to nothing under a wide card, where an arc
+     across a small part of a long edge reads as a wobble rather than as a fan. */
+  --qm-drop: calc(var(--qm-size) * 0.72);
+  --qm-rise: clamp(0px, calc((280px - var(--pw)) * 0.045), 7px);
+
+  /* Anchored 4px inside the pill's own edge, so the outer items tuck slightly
+     behind it and the fan reads as opening out from under the pill rather than
+     floating detached below. --qm-dir flips every vertical offset in one place.
+     The fallback matches the resting circle, for the first paint before
+     hotrect.js has run. */
+  --qm-dir: 1;
+  top: calc(var(--pill-bottom, 74px) - 4px);
+}
+
+/* No room below (a tall card against the window's fixed bottom edge) — fan
+   upward from the pill's top edge instead of being clipped. */
+.quick-menu-above #quick-menu {
+  --qm-dir: -1;
+  top: calc(var(--pill-top, 8px) + 4px);
 }
 
 .quick-menu-item {
+  --o: 0;
+  --rise: 0;
   position: absolute;
   top: 0;
   left: 0;
-  width: 34px;
-  height: 34px;
+  width: var(--qm-size);
+  height: var(--qm-size);
+  padding: 0;
   border-radius: 50%;
-  background: #1a1a1a;
-  border: 1px solid #333;
+  background: rgba(18, 18, 21, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(8px);
   color: #ddd;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   opacity: 0;
+  /* Collapsed onto the anchor, so opening is one motion out of the pill. */
   transform: translate(-50%, -50%) scale(0.4);
   pointer-events: none;
   transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.15s ease,
     background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 
-/* Shallow downward arc: outer items sit a little higher than the center
-   one, like a fan opening from the pill. */
 #quick-menu.visible .quick-menu-item {
   opacity: 1;
   pointer-events: auto;
+  transform: translate(
+      calc(-50% + var(--o) * var(--qm-gap)),
+      calc(-50% + var(--qm-dir) * (var(--qm-drop) - var(--rise) * var(--qm-rise)))
+    )
+    scale(1);
+  /* Staggered by distance from the centre, so the fan opens outwards from the
+     pill instead of sweeping left to right. */
+  transition-delay: calc(var(--rise) * 0.05s);
 }
 
-#quick-menu.visible .quick-menu-item:nth-child(1) {
-  transform: translate(calc(-50% - 52px), calc(-50% + 18px)) scale(1);
-  transition-delay: 0.02s;
-}
-
-#quick-menu.visible .quick-menu-item:nth-child(2) {
-  /* Was +30px: the centre item is the lowest point of the whole menu, so most
-     of the excess distance from the pill was here rather than in the anchor. */
-  transform: translate(-50%, calc(-50% + 24px)) scale(1);
-  transition-delay: 0.06s;
-}
-
-#quick-menu.visible .quick-menu-item:nth-child(3) {
-  transform: translate(calc(-50% + 52px), calc(-50% + 18px)) scale(1);
-  transition-delay: 0.1s;
-}
-
-.quick-menu-item:hover {
-  background: #2a2a2a;
+.quick-menu-item:hover,
+.quick-menu-item:focus-visible {
+  background: rgba(40, 40, 44, 0.94);
   border-color: #e8b04b;
   color: #e8b04b;
+  outline: none;
 }
 
 /* The "hide to tray" button reads as a destructive/dismissive action, unlike
    Workspace/Settings — amber hover would be misleading here. */
-.quick-menu-item--close:hover {
-  background: #2a2a2a;
+.quick-menu-item--close:hover,
+.quick-menu-item--close:focus-visible {
   border-color: #e05c5c;
   color: #e05c5c;
 }
 
 .quick-menu-item svg {
-  width: 16px;
-  height: 16px;
+  /* Scaled with the button rather than fixed at 16px, which left a small button
+     looking like a large icon in a ring. */
+  width: 46%;
+  height: 46%;
+  transition: transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* The lift on hover goes on the icon, not the button: the button's own
+   transform is its position on the arc, and a hover rule would have to
+   restate the whole thing to add to it. */
+.quick-menu-item:hover svg {
+  transform: scale(1.14);
+}
+
+.quick-menu-item:active svg {
+  transform: scale(0.94);
 }

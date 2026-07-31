@@ -1,3 +1,32 @@
+/* Settings window. Shares the workspace window's design tokens so the two
+   windows read as one app rather than as two programs that happen to be the
+   same colour — anything added here should come from the token list below
+   rather than from a fresh hex value. */
+:root {
+  --bg: #0a0a0b;
+  --bg-sidebar: #0d0d0f;
+  --bg-card: #131315;
+  --bg-input: #0f0f11;
+  --bg-hover: #1b1b1e;
+  --border: #232326;
+  --border-soft: #1a1a1c;
+  --text: #f2f2f0;
+  --text-dim: #8a8a90;
+  --text-faint: #55555b;
+  --accent: #e8b04b;
+  --accent-ink: #1a1400;
+  --accent-soft: rgba(232, 176, 75, 0.13);
+  --accent-line: rgba(232, 176, 75, 0.32);
+  --danger: #e0645a;
+  --danger-soft: rgba(224, 100, 90, 0.12);
+  --success: #7bc79e;
+  --success-soft: rgba(123, 199, 158, 0.11);
+  --mono: "Cascadia Mono", ui-monospace, SFMono-Regular, Consolas, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --ease: cubic-bezier(0.16, 0.8, 0.3, 1);
+  --radius: 10px;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -16,16 +45,23 @@ body {
 body {
   display: flex;
   flex-direction: column;
-  background: #141414;
-  color: #eee;
-  font-family: -apple-system, "Segoe UI", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
   border-radius: 10px;
-  border: 1px solid #2a2a2a;
+  border: 1px solid var(--border);
+}
+
+::selection {
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 9px;
+  height: 9px;
 }
 
 ::-webkit-scrollbar-track {
@@ -33,43 +69,73 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #333;
+  background: #26262a;
+  border: 2px solid transparent;
+  background-clip: content-box;
   border-radius: 8px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #444;
+  background: #3a3a40;
+  background-clip: content-box;
 }
 
+:focus-visible {
+  outline: 2px solid var(--accent-line);
+  outline-offset: 2px;
+}
+
+/* ---------- titlebar (window is decorations:false) ---------- */
+
 #titlebar {
-  height: 34px;
+  height: 38px;
   flex: 0 0 auto;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 8px;
   padding: 0 4px 0 14px;
-  background: #1a1a1a;
-  border-bottom: 1px solid #262626;
+  background: var(--bg-sidebar);
+  border-bottom: 1px solid var(--border-soft);
   border-radius: 10px 10px 0 0;
 }
 
 #titlebar-title {
   font-size: 12px;
   font-weight: 600;
-  color: #ccc;
+  color: var(--text-dim);
+  letter-spacing: 0.01em;
+}
+
+/* Which section is open, kept in the titlebar so it stays visible after the
+   section's own heading has scrolled away. */
+#titlebar-crumb {
+  font-size: 12px;
+  color: var(--text-faint);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#titlebar-crumb::before {
+  content: "/";
+  margin-right: 7px;
+  color: #2e2e33;
 }
 
 .titlebar-btn {
   width: 44px;
-  height: 34px;
+  height: 38px;
   border: none;
   background: transparent;
-  color: #aaa;
+  color: var(--text-faint);
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   border-radius: 0 10px 0 0;
+  transition: background 0.12s var(--ease), color 0.12s var(--ease);
 }
 
 .titlebar-btn svg {
@@ -82,9 +148,8 @@ body {
   color: #fff;
 }
 
-/* Hub layout: a left nav rail (LLM / GitHub / ...) + a content pane on the
-   right showing whichever section is active. Built so adding a third
-   section later (Mail) is just one more nav button + one more <section>. */
+/* ---------- hub: nav rail + content pane ---------- */
+
 .hub {
   flex: 1;
   display: flex;
@@ -92,115 +157,360 @@ body {
 }
 
 .hub-sidebar {
-  flex: 0 0 150px;
+  flex: 0 0 164px;
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 14px 10px;
-  background: #191919;
-  border-right: 1px solid #262626;
+  gap: 1px;
+  padding: 12px 10px 14px;
+  overflow-y: auto;
+  background: var(--bg-sidebar);
+  border-right: 1px solid var(--border-soft);
   border-radius: 0 0 0 10px;
 }
 
+/* Eight flat buttons read as one long list; three short labelled runs read as
+   a map of the window. */
+.nav-group-label {
+  padding: 12px 10px 5px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #4a4a50;
+}
+
+.nav-group-label:first-child {
+  padding-top: 2px;
+}
+
 .hub-nav-item {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 9px;
-  padding: 9px 10px;
+  padding: 8px 10px;
   background: transparent;
   border: none;
   border-radius: 8px;
-  color: #999;
-  font-size: 13px;
-  font-weight: 600;
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 550;
   cursor: pointer;
   text-align: left;
+  transition: background 0.12s var(--ease), color 0.12s var(--ease);
 }
 
 .hub-nav-item svg {
   width: 15px;
   height: 15px;
   flex: 0 0 auto;
+  opacity: 0.85;
 }
 
 .hub-nav-item:hover {
-  background: #222;
-  color: #ccc;
+  background: var(--bg-hover);
+  color: var(--text);
 }
 
 .hub-nav-item.active {
-  background: rgba(232, 176, 75, 0.12);
-  color: #e8b04b;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+/* A left-edge marker as well as the fill: the fill alone is easy to lose
+   against the rail's own background at a glance. */
+.hub-nav-item.active::before {
+  content: "";
+  position: absolute;
+  left: -10px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 17px;
+  border-radius: 0 3px 3px 0;
+  background: var(--accent);
 }
 
 .hub-content {
   flex: 1;
   min-width: 0;
   overflow-y: auto;
+  scrollbar-gutter: stable;
 }
 
 .hub-section {
   display: none;
   flex-direction: column;
   gap: 14px;
-  padding: 18px 22px 22px;
+  padding: 20px 24px 30px;
+  max-width: 760px;
 }
 
 .hub-section.active {
   display: flex;
+  animation: section-in 0.18s var(--ease);
 }
+
+@keyframes section-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+/* ---------- section heading ---------- */
+
+.sec-head {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sec-head h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+.sec-head p {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-dim);
+  max-width: 62ch;
+}
+
+/* ---------- card ---------- */
+
+.card {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-card);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+}
+
+.card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.card-head h3 {
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  font-weight: 650;
+  color: var(--text);
+}
+
+.card-head .btn {
+  margin-left: auto;
+}
+
+.card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+  padding: 14px;
+}
+
+/* A card can hold a list and then some prose about it (the mailbox list does).
+   The rule keeps them from running together without needing a spacer element
+   in the markup. */
+.llm-profile-list + .card-body,
+.voice-readiness + .card-body {
+  border-top: 1px solid var(--border-soft);
+}
+
+.card-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 14px;
+  border-top: 1px solid var(--border-soft);
+}
+
+/* Everything after the first element is pushed right, so a destructive button
+   placed first sits away from the one people actually mean to press. */
+.card-foot > :first-child {
+  margin-right: auto;
+}
+
+.card-foot.right {
+  justify-content: flex-end;
+}
+
+.card-foot.right > :first-child {
+  margin-right: 0;
+}
+
+/* ---------- prose ---------- */
 
 .hint {
   margin: 0;
   font-size: 12px;
-  line-height: 1.5;
-  color: #888;
+  line-height: 1.55;
+  color: var(--text-dim);
+  max-width: 66ch;
 }
+
+/* A quieter second-level hint, for the sentence that qualifies the control
+   directly above it rather than introducing the whole section. */
+.hint.subtle {
+  font-size: 11.5px;
+  color: var(--text-faint);
+  line-height: 1.5;
+}
+
+/* Parameter and flag names inside a hint. Rendered as a name rather than as
+   emphasis, matching how `.field em` is used for labels — italic prose would
+   read as stress, not as an identifier. */
+.hint em {
+  font-style: normal;
+  color: #9d9d9d;
+}
+
+.hint strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* ---------- fields ---------- */
 
 .field {
   display: flex;
   flex-direction: column;
   gap: 6px;
   font-size: 12px;
-  color: #bbb;
+  color: var(--text-dim);
+}
+
+.field > span:first-child {
+  font-weight: 550;
+  color: #b9b9be;
 }
 
 .field em {
-  color: #666;
+  color: var(--text-faint);
   font-style: normal;
+  font-weight: 400;
 }
 
 .field input {
-  background: #1c1c1c;
-  border: 1px solid #333;
+  width: 100%;
+  background: var(--bg-input);
+  border: 1px solid #2a2a2e;
   border-radius: 8px;
-  padding: 9px 10px;
-  color: #f0f0f0;
+  padding: 9px 11px;
+  color: var(--text);
   font-size: 13px;
   font-family: inherit;
   outline: none;
   user-select: text;
   -webkit-user-select: text;
+  transition: border-color 0.12s var(--ease), box-shadow 0.12s var(--ease);
+}
+
+.field input::placeholder {
+  color: #47474d;
+}
+
+.field input:hover {
+  border-color: #35353a;
 }
 
 .field input:focus {
-  border-color: #e8b04b;
-  box-shadow: 0 0 0 3px rgba(232, 176, 75, 0.15);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 .field-row {
   display: flex;
-  gap: 14px;
-  align-items: flex-end;
+  gap: 13px;
 }
+
+.field-row > .field {
+  flex: 1;
+  min-width: 0;
+}
+
+/* A secret plus the button that shows it. The button sits inside the box's
+   right padding rather than beside it, so a password field lines up with every
+   other field instead of being visibly narrower. */
+.input-wrap {
+  position: relative;
+  display: flex;
+}
+
+.input-wrap input {
+  padding-right: 38px;
+}
+
+.input-reveal {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  transition: color 0.12s var(--ease), background 0.12s var(--ease);
+}
+
+.input-reveal svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+}
+
+.input-reveal:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+/* ---------- switch rows ---------- */
 
 .switch-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: 14px;
   font-size: 12px;
-  color: #bbb;
+  color: #b9b9be;
+  cursor: pointer;
+}
+
+.switch-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+
+.switch-copy > span:first-child {
+  font-size: 12.5px;
+  font-weight: 550;
+  color: #b9b9be;
+}
+
+.switch-copy .hint {
   cursor: pointer;
 }
 
@@ -209,7 +519,7 @@ body {
   display: inline-block;
   flex: 0 0 auto;
   width: 38px;
-  height: 20px;
+  height: 21px;
 }
 
 .switch input {
@@ -222,71 +532,82 @@ body {
 .switch-track {
   position: absolute;
   inset: 0;
-  background: #333;
+  background: #2c2c31;
   border-radius: 20px;
-  transition: background 0.15s ease;
+  transition: background 0.16s var(--ease);
 }
 
 .switch-thumb {
   position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 16px;
-  height: 16px;
-  background: #ccc;
+  top: 3px;
+  left: 3px;
+  width: 15px;
+  height: 15px;
+  background: #b0b0b6;
   border-radius: 50%;
-  transition: transform 0.15s ease, background 0.15s ease;
+  transition: transform 0.16s var(--ease), background 0.16s var(--ease);
 }
 
 .switch input:checked ~ .switch-track {
-  background: #e8b04b;
+  background: var(--accent);
 }
 
 .switch input:checked ~ .switch-track .switch-thumb {
-  transform: translateX(18px);
-  background: #1a1400;
+  transform: translateX(17px);
+  background: var(--accent-ink);
+}
+
+.switch input:focus-visible ~ .switch-track {
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 #startCommandField.disabled {
-  opacity: 0.45;
+  opacity: 0.4;
   pointer-events: none;
 }
 
+/* ---------- status ---------- */
+
 .status {
-  min-height: 34px;
-  max-height: 130px;
-  overflow-y: auto;
+  max-height: 140px;
   font-size: 12px;
-  line-height: 1.4;
-  padding: 8px 10px;
+  line-height: 1.45;
+  padding: 9px 11px;
   border-radius: 8px;
   display: none;
   white-space: pre-wrap;
   word-break: break-word;
   flex: 0 0 auto;
+  border: 1px solid var(--border);
+  background: #17171a;
+  color: var(--text-dim);
+  overflow-y: auto;
 }
 
 .status.visible {
   display: block;
+  animation: section-in 0.16s var(--ease);
 }
 
 .status.ok {
-  background: rgba(80, 200, 120, 0.12);
-  color: #7bd99a;
-  border: 1px solid rgba(80, 200, 120, 0.3);
+  background: var(--success-soft);
+  color: #8fd3ac;
+  border-color: rgba(123, 199, 158, 0.28);
 }
 
 .status.error {
-  background: rgba(220, 80, 80, 0.12);
-  color: #e79797;
-  border: 1px solid rgba(220, 80, 80, 0.3);
+  background: var(--danger-soft);
+  color: #eb9089;
+  border-color: rgba(224, 100, 90, 0.3);
 }
 
 .status.pending {
-  background: rgba(232, 176, 75, 0.1);
-  color: #e8b04b;
-  border: 1px solid rgba(232, 176, 75, 0.25);
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent-line);
 }
+
+/* ---------- buttons ---------- */
 
 .actions {
   flex: 0 0 auto;
@@ -295,198 +616,269 @@ body {
   justify-content: flex-end;
 }
 
+/* Keeps a reset-everything button away from the Save it sits next to. */
+.actions.spread {
+  justify-content: space-between;
+}
+
 .btn {
-  background: #222;
-  border: 1px solid #333;
-  color: #ddd;
+  background: #1e1e21;
+  border: 1px solid #2c2c31;
+  color: #dcdcdf;
   padding: 8px 14px;
   border-radius: 8px;
   font-size: 12px;
+  font-family: inherit;
   font-weight: 600;
   cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s var(--ease), border-color 0.12s var(--ease),
+    color 0.12s var(--ease);
 }
 
 .btn:hover {
-  background: #2a2a2a;
-  border-color: #444;
+  background: #26262a;
+  border-color: #3a3a40;
+  color: var(--text);
+}
+
+.btn:active {
+  transform: translateY(1px);
 }
 
 .btn.primary {
-  background: #e8b04b;
-  border-color: #e8b04b;
-  color: #1a1400;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
 }
 
 .btn.primary:hover {
-  background: #f0bc5e;
+  background: #f2c063;
+  border-color: #f2c063;
+  color: var(--accent-ink);
+}
+
+.btn.danger {
+  color: #c98a84;
+  border-color: #332624;
+  background: transparent;
+}
+
+.btn.danger:hover {
+  background: var(--danger-soft);
+  border-color: rgba(224, 100, 90, 0.35);
+  color: #eb9089;
 }
 
 .btn:disabled {
-  opacity: 0.6;
+  opacity: 0.45;
   cursor: default;
+  transform: none;
 }
 
 .btn.small {
   padding: 5px 10px;
-  font-size: 11px;
+  font-size: 11.5px;
 }
+
+/* ---------- profile lists (LLM / STT / TTS / Google accounts) ---------- */
+/* Rows are built by settings.js, so these selectors describe a shape rather
+   than any one list. */
 
 .llm-profile-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
 }
 
 .llm-profile-row {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  background: #1a1a1a;
-  border: 1px solid #262626;
-  border-radius: 8px;
+  gap: 10px;
+  padding: 10px 14px;
+  background: transparent;
+  border: none;
+  border-top: 1px solid var(--border-soft);
   cursor: pointer;
+  transition: background 0.12s var(--ease);
+}
+
+.llm-profile-list > .llm-profile-row:first-child {
+  border-top: none;
+}
+
+/* The dot that marks which row is loaded into the form below. Drawn on every
+   row so the rows stay aligned whether or not one is selected. */
+.llm-profile-row::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #2f2f34;
+  transition: background 0.12s var(--ease), box-shadow 0.12s var(--ease);
 }
 
 .llm-profile-row:hover {
-  border-color: #444;
+  background: #17171a;
 }
 
 .llm-profile-row.editing {
-  border-color: #e8b04b;
-  background: rgba(232, 176, 75, 0.08);
+  background: rgba(232, 176, 75, 0.06);
+}
+
+.llm-profile-row.editing::before {
+  background: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 .llm-profile-row-label {
   flex: 1;
-  font-size: 12px;
-  font-weight: 600;
-  color: #eee;
+  font-size: 12.5px;
+  font-weight: 550;
+  color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.llm-profile-row.editing .llm-profile-row-label {
+  color: var(--accent);
+}
+
+/* The model name is a tag, not a second title — it should never compete with
+   the profile's own name for the row. */
 .llm-profile-row-model {
   font-size: 11px;
-  color: #777;
+  font-family: var(--mono);
+  color: var(--text-dim);
+  background: #1c1c1f;
+  border: 1px solid var(--border-soft);
+  border-radius: 5px;
+  padding: 2px 6px;
   flex: 0 0 auto;
-  max-width: 40%;
+  max-width: 42%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.llm-profile-row-model:empty {
+  display: none;
 }
 
 .llm-profile-row-del {
   flex: 0 0 auto;
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
   display: flex;
   align-items: center;
   justify-content: center;
   border: none;
   background: transparent;
-  color: #777;
+  color: var(--text-faint);
   border-radius: 6px;
   cursor: pointer;
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1;
+  opacity: 0;
+  transition: opacity 0.12s var(--ease), background 0.12s var(--ease),
+    color 0.12s var(--ease);
+}
+
+/* Revealed on hover or focus: a delete button on every row at all times is a
+   row of delete buttons, and this list is mostly read rather than edited. */
+.llm-profile-row:hover .llm-profile-row-del,
+.llm-profile-row-del:focus-visible {
+  opacity: 1;
 }
 
 .llm-profile-row-del:hover {
-  background: rgba(220, 80, 80, 0.15);
-  color: #e79797;
+  background: var(--danger-soft);
+  color: #eb9089;
 }
 
 .llm-profile-empty {
   font-size: 12px;
-  color: #666;
-  padding: 4px 0;
+  color: var(--text-faint);
+  padding: 14px;
+  text-align: center;
 }
 
 .panel-divider {
   flex: 0 0 auto;
   height: 1px;
-  background: #262626;
+  background: var(--border-soft);
   margin: 2px 0;
 }
 
-.report-head {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
+/* ---------- GitHub report ---------- */
 
 .report-updated {
   font-size: 11px;
-  color: #666;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
 }
 
 .report-error {
   display: none;
   flex: 0 0 auto;
   font-size: 12px;
-  color: #e79797;
-  background: rgba(220, 80, 80, 0.12);
-  border: 1px solid rgba(220, 80, 80, 0.3);
+  color: #eb9089;
+  background: var(--danger-soft);
+  border: 1px solid rgba(224, 100, 90, 0.3);
   border-radius: 8px;
-  padding: 8px 10px;
+  padding: 9px 11px;
+  margin: 14px 14px 0;
 }
 
 .report-error.visible {
   display: block;
 }
 
-.report-section {
-  flex: 0 0 auto;
-}
-
 .report-section h4 {
-  margin: 0 0 8px;
-  font-size: 11px;
+  margin: 0;
+  font-size: 10px;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: #888;
-  font-weight: 600;
+  letter-spacing: 0.07em;
+  color: #4a4a50;
+  font-weight: 700;
+  padding: 12px 14px 8px;
 }
 
 .report-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
 }
 
 .report-empty {
   font-size: 12px;
-  color: #666;
-  padding: 6px 0;
+  color: var(--text-faint);
+  padding: 4px 14px 12px;
 }
 
 .report-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  background: #1a1a1a;
-  border: 1px solid #262626;
-  border-radius: 8px;
+  gap: 9px;
+  padding: 9px 14px;
+  border-top: 1px solid var(--border-soft);
   cursor: pointer;
+  transition: background 0.12s var(--ease);
 }
 
 .report-item:hover {
-  border-color: #e8b04b;
+  background: #17171a;
 }
 
 .report-dot {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   flex: 0 0 auto;
 }
 
 .report-dot.open {
-  background: #7bd99a;
+  background: var(--success);
 }
 
 .report-dot.merged {
@@ -494,163 +886,188 @@ body {
 }
 
 .report-dot.closed {
-  background: #e79797;
+  background: var(--danger);
 }
 
 .report-item-title {
   flex: 1;
-  font-size: 12px;
-  color: #eee;
+  font-size: 12.5px;
+  color: #dcdcdf;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.report-item:hover .report-item-title {
+  color: var(--text);
+}
+
 .report-item-meta {
   font-size: 11px;
-  color: #777;
+  color: var(--text-faint);
   flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
 }
 
-/* ---------- Voice assistant section ---------- */
-
-/* A quieter second-level hint, for the sentence that qualifies the control
-   directly above it rather than introducing the whole section. */
-.hint.subtle {
-  font-size: 11px;
-  color: #6d6d6d;
-  margin-top: -2px;
-}
-
-/* Parameter and flag names inside a hint. Rendered as a name rather than as
-   emphasis, matching how `.field em` is already used for labels above —
-   italic prose would read as stress, not as an identifier. */
-.hint em {
-  font-style: normal;
-  color: #9d9d9d;
-}
+/* ---------- voice readiness ---------- */
 
 .voice-readiness {
   display: flex;
   flex-direction: column;
-  gap: 6px;
 }
 
 .voice-check {
-  font-size: 12px;
-  padding: 7px 10px;
-  border-radius: 8px;
-  border: 1px solid #2a2a2a;
-  background: #191919;
-  color: #9a9a9a;
+  font-size: 12.5px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--border-soft);
+  color: var(--text-dim);
+}
+
+.voice-readiness > .voice-check:first-child {
+  border-top: none;
 }
 
 .voice-check.ok {
-  color: #7fc98a;
-  border-color: #26382a;
+  color: #8fd3ac;
 }
 
 /* Amber, not red: a dependency that isn't configured yet is an unfinished
    setup step, not an error. Clickable (it jumps to the section that fixes
    it), which the pointer and hover state have to advertise. */
 .voice-check.missing {
-  color: #e8b04b;
-  border-color: #3d3220;
+  color: var(--accent);
   cursor: pointer;
+  transition: background 0.12s var(--ease);
 }
 
 .voice-check.missing:hover,
 .voice-check.missing:focus-visible {
-  background: #221d12;
-  border-color: #6b4a1e;
+  background: rgba(232, 176, 75, 0.07);
   outline: none;
 }
 
 .slider-row {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 14px;
 }
 
 .slider-row input[type="range"] {
   flex: 1;
-  accent-color: #e8b04b;
+  accent-color: var(--accent);
   /* The generic `.field input` styling above is built for text boxes — its
      padding and border turn a range input into a boxed-in slider. */
   padding: 0;
   border: none;
   background: none;
+  height: 20px;
+  cursor: pointer;
+}
+
+.slider-row input[type="range"]:hover,
+.slider-row input[type="range"]:focus {
+  border: none;
+  box-shadow: none;
 }
 
 .slider-row output {
-  min-width: 34px;
-  text-align: right;
+  min-width: 42px;
+  text-align: center;
   font-size: 12px;
   font-variant-numeric: tabular-nums;
-  color: #f0f0f0;
+  color: var(--text);
+  background: var(--bg-input);
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  padding: 4px 0;
 }
 
-/* --- Advanced section (settings.js's generated tunables form) --------------
-   Every row here is built by buildTunableRow from the schema the backend
-   sends, so these selectors describe a shape rather than any one setting. */
+/* ---------- generated tunables form (Advanced + Memory) -------------------
+   Every row here is built by settings.js's buildTunableRow from the schema the
+   backend sends, so these selectors describe a shape rather than any one
+   setting. Label on the left, control on the right, help underneath both:
+   thirty stacked label-over-input pairs is a very tall form to read. */
 
 .tunable-group {
-  margin-bottom: 22px;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-card);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  margin-bottom: 12px;
+}
+
+.tunable-group:last-child {
+  margin-bottom: 0;
 }
 
 .tunable-group h4 {
-  margin: 0 0 10px;
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: #888;
-  font-weight: 600;
+  margin: 0;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--border-soft);
+  font-size: 12.5px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text);
+  font-weight: 650;
 }
 
 .tunable {
-  padding: 10px 0 12px;
-  border-top: 1px solid #262626;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 14px;
+  padding: 11px 14px 12px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.tunable-group h4 + .tunable {
+  border-top: none;
 }
 
 .tunable-head {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 7px;
+  flex-wrap: wrap;
 }
 
 .tunable-label {
-  font-size: 12px;
-  color: #bbb;
+  font-size: 12.5px;
+  color: #b9b9be;
 }
 
 /* A value the user has moved off its default. Marked because "which of these
    did I change?" is otherwise unanswerable in a form of thirty numbers that
    all look equally deliberate. */
 .tunable.overridden .tunable-label {
-  color: #f0f0f0;
+  color: var(--text);
+  font-weight: 550;
 }
 
 .tunable.overridden .tunable-label::after {
   content: "•";
   margin-left: 6px;
-  color: #e8b04b;
+  color: var(--accent);
 }
 
 .tunable-badge {
-  font-size: 10px;
+  font-size: 9.5px;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: #e8b04b;
-  border: 1px solid #4a3a1c;
+  letter-spacing: 0.05em;
+  font-weight: 700;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid rgba(232, 176, 75, 0.2);
   border-radius: 5px;
-  padding: 1px 5px;
+  padding: 2px 5px;
 }
 
 .tunable-input {
   display: flex;
   align-items: center;
   gap: 8px;
+  justify-content: flex-end;
 }
 
 /* Excludes the checkbox a `toggle` setting renders: that one is deliberately
@@ -658,69 +1075,87 @@ body {
    control), and this rule sits later in the file, so without the exclusion it
    would win on equal specificity and turn every switch into a text box. */
 .tunable-input input:not([type="checkbox"]) {
-  /* Same treatment as `.field input`, which only applies inside a .field. */
-  width: 108px;
-  background: #1c1c1c;
-  border: 1px solid #333;
+  width: 96px;
+  background: var(--bg-input);
+  border: 1px solid #2a2a2e;
   border-radius: 8px;
   padding: 7px 9px;
-  color: #f0f0f0;
+  color: var(--text);
   font-size: 13px;
   font-family: inherit;
   font-variant-numeric: tabular-nums;
+  text-align: right;
   outline: none;
   user-select: text;
   -webkit-user-select: text;
+  transition: border-color 0.12s var(--ease), box-shadow 0.12s var(--ease);
 }
 
-/* The app-name lists are prose, not a number — they need the room. */
+/* The app-name lists are prose, not a number — they need the room, so that row
+   gives the control the full width and drops the label to its own line. */
 .tunable-input input[type="text"] {
-  flex: 1;
+  width: 100%;
   font-variant-numeric: normal;
+  text-align: left;
+}
+
+.tunable:has(.tunable-input input[type="text"]) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.tunable-input input:not([type="checkbox"]):hover {
+  border-color: #35353a;
 }
 
 .tunable-input input:not([type="checkbox"]):focus {
-  border-color: #e8b04b;
-  box-shadow: 0 0 0 3px rgba(232, 176, 75, 0.15);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 .tunable-unit {
   font-size: 11px;
-  color: #777;
+  color: var(--text-faint);
+  min-width: 32px;
 }
 
 .tunable-reset {
-  margin-left: auto;
   background: none;
-  border: 1px solid #333;
+  border: 1px solid transparent;
   border-radius: 6px;
-  width: 24px;
-  height: 24px;
-  color: #888;
+  width: 26px;
+  height: 26px;
+  color: var(--text-faint);
   font-size: 13px;
   line-height: 1;
   cursor: pointer;
+  flex: 0 0 auto;
+  transition: color 0.12s var(--ease), border-color 0.12s var(--ease),
+    background 0.12s var(--ease);
 }
 
 .tunable-reset:hover:not(:disabled) {
-  color: #f0f0f0;
-  border-color: #555;
+  color: var(--text);
+  border-color: #3a3a40;
+  background: var(--bg-hover);
 }
 
 /* Disabled rather than hidden when the value is already its default: a button
    that appears and disappears as you type is noisier than one that dims. */
 .tunable-reset:disabled {
-  opacity: 0.25;
+  opacity: 0.2;
   cursor: default;
 }
 
-.tunable-help {
-  margin-top: 7px;
+.tunable-help,
+.tunable-port-note {
+  grid-column: 1 / -1;
+  margin: 3px 0 0;
+  max-width: 70ch;
 }
 
 .tunable-port-note {
   margin-top: 7px;
-  color: #e8b04b;
+  color: var(--accent);
   /* Holds a URL the user has to retype elsewhere, so it has to be selectable
      and must not be broken across lines mid-address. */
   user-select: text;
@@ -731,10 +1166,10 @@ body {
 /* The "currently listening" confirmation, as opposed to the amber
    you-must-also-edit-your-hooks warning it sits under. */
 .tunable-port-note.ok {
-  color: #5fa876;
+  color: #6fbb8d;
 }
 
-/* --- Memory section ------------------------------------------------------- */
+/* ---------- Memory section ---------- */
 
 /* What the index actually holds. Sits above the settings rather than below,
    because "is this doing anything?" is the first question the section has to
@@ -742,41 +1177,43 @@ body {
 .memory-status {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  margin-bottom: 4px;
+  gap: 8px;
+  padding: 14px;
 }
 
 .memory-line {
-  font-size: 12px;
-  line-height: 1.5;
-  color: #888;
-  padding-left: 14px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-dim);
+  padding-left: 20px;
   position: relative;
 }
 
 .memory-line::before {
   content: "•";
   position: absolute;
-  left: 0;
-  color: #555;
+  left: 3px;
+  color: #3a3a40;
 }
 
 .memory-line.ok {
-  color: #bbb;
+  color: #b9b9be;
 }
 
 .memory-line.ok::before {
   content: "✓";
-  color: #5fa876;
+  color: var(--success);
+  font-size: 11px;
 }
 
 .memory-line.bad {
-  color: #e8b04b;
+  color: var(--accent);
 }
 
 .memory-line.bad::before {
   content: "!";
-  color: #e8b04b;
+  color: var(--accent);
+  font-weight: 700;
 }
 
 /* The path and its buttons on one line. The path itself shrinks and ellipsizes
@@ -792,13 +1229,13 @@ body {
 .chats-dir-row code {
   flex: 1;
   min-width: 0;
-  background: #1c1c1c;
-  border: 1px solid #2a2a2a;
+  background: var(--bg-input);
+  border: 1px solid var(--border-soft);
   border-radius: 8px;
   padding: 8px 10px;
-  color: #bbb;
+  color: var(--text-dim);
   font-size: 11px;
-  font-family: "Cascadia Mono", Consolas, monospace;
+  font-family: var(--mono);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -810,5 +1247,34 @@ body {
    generated form emits per group would be a title repeating the tab name. */
 #memoryTunables .tunable:first-child {
   border-top: none;
-  padding-top: 0;
+}
+
+/* ---------- narrow window ---------- */
+/* The window can be dragged down to 520px wide, where a 164px rail of labels
+   is a third of it. Below that the rail keeps the icons and drops the words. */
+@media (max-width: 620px) {
+  .hub-sidebar {
+    flex-basis: 52px;
+    padding: 12px 8px;
+    align-items: center;
+  }
+
+  .hub-nav-item {
+    justify-content: center;
+    padding: 9px;
+    width: 100%;
+  }
+
+  .hub-nav-item span,
+  .nav-group-label {
+    display: none;
+  }
+
+  .hub-nav-item.active::before {
+    display: none;
+  }
+
+  .hub-section {
+    padding: 18px 16px 26px;
+  }
 }

@@ -539,6 +539,7 @@ pub async fn voice_reply_stream(window: tauri::Window, app: tauri::AppHandle, tu
             api_key: &profile.api_key,
             think: profile.think,
             max_tokens: crate::tunables::int(&app, crate::tunables::VOICE_MAX_TOKENS) as u32,
+            timeout_secs: crate::tunables::int(&app, crate::tunables::LLM_REPLY_TIMEOUT) as u64,
         };
         let result = crate::ai::llm::run_chat_stream(
             &endpoint,
@@ -557,6 +558,10 @@ pub async fn voice_reply_stream(window: tauri::Window, app: tauri::AppHandle, tu
                     index += 1;
                 }
             },
+            // No cancellation on the spoken path: there is no Stop button to
+            // press, and a voice turn is short by construction (no tool rounds,
+            // capped tokens). The predicate exists for the typed chat.
+            &|| false,
         );
 
         match result {

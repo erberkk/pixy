@@ -7,7 +7,7 @@ use serde_json::json;
 use tauri::Emitter;
 
 use crate::config::{read_config, write_config, LlmProfile};
-use crate::ai::process::{autostart_if_needed, is_reachable, spawn_detached, stop_tracked};
+use crate::ai::process::{autostart_if_needed, is_reachable, spawn_detached, stop_local_server};
 
 const DEFAULT_LLM_BASE_URL: &str = "http://localhost:11434/v1";
 
@@ -113,10 +113,18 @@ pub fn get_active_llm_profile(app: tauri::AppHandle) -> LlmProfile {
         .unwrap_or_default()
 }
 
-// PID of the LLM server process we spawned ourselves (if any), so "Quit
-// (also stop LLM server)" in the tray menu can kill exactly that process —
-// never a server the user already had running before the widget started.
-static LLM_CHILD_PID: Mutex<Option<u32>> = Mutex::new(None);
+// Where the LLM server is expected to answer: the active profile's endpoint, or
+// the default if no profile has been set up yet. Shared by the startup spawn and
+// the tray's stop-and-quit so the two can never disagree about which server they
+// mean.
+fn autostart_base_url(cfg: &crate::config::AppConfig) -> String {
+    cfg.llm_active_profile_id
+        .as_ref()
+        .and_then(|id| cfg.llm_profiles.iter().find(|p| &p.id == id))
+        .or_else(|| cfg.llm_profiles.first())
+        .map(|p| p.base_url.clone())
+        .unwrap_or_else(|| DEFAULT_LLM_BASE_URL.to_string())
+}
 
 // Called once at widget startup.
 pub fn maybe_autostart(app: &tauri::AppHandle) {
@@ -124,23 +132,17 @@ pub fn maybe_autostart(app: &tauri::AppHandle) {
     if !cfg.llm_autostart {
         return;
     }
-    let Some(command) = cfg.llm_start_command.filter(|s| !s.trim().is_empty()) else {
+    let Some(command) = cfg.llm_start_command.clone().filter(|s| !s.trim().is_empty()) else {
         return;
     };
-    let base_url = cfg
-        .llm_active_profile_id
-        .as_ref()
-        .and_then(|id| cfg.llm_profiles.iter().find(|p| &p.id == id))
-        .or_else(|| cfg.llm_profiles.first())
-        .map(|p| p.base_url.clone())
-        .unwrap_or_else(|| DEFAULT_LLM_BASE_URL.to_string());
-    autostart_if_needed(&base_url, &command, &LLM_CHILD_PID);
+    autostart_if_needed(&autostart_base_url(&cfg), &command);
 }
 
-// Only kills a process this widget spawned itself (see LLM_CHILD_PID above)
-// — a no-op if autostart was off or the server was already running.
-pub fn stop_autostarted() {
-    stop_tracked(&LLM_CHILD_PID);
+/// Stops the local LLM server for the tray's stop-and-quit, whoever started it —
+/// see process::stop_local_server for why that is the right target and how the
+/// old spawned-PID version failed.
+pub fn stop_server(app: &tauri::AppHandle) {
+    stop_local_server(&autostart_base_url(&read_config(app)));
 }
 
 // The chat UI's (or Settings') "Start now" button for any of the three
@@ -433,6 +435,75 @@ pub fn judge_issue_thread(
     }
 }
 
+// Boils one long message down to a line or two for a mail notice or the
+// morning card. Backend-only, called from mail/summary.rs.
+//
+// Returns Ok(None) rather than an error when the model produces nothing usable,
+// because every caller treats "no summary" and "summary failed" identically:
+// both fall back to showing the message's own opening lines. A summary is an
+// improvement on the fallback, never a precondition for it.
+//
+// Deliberately does NOT ask for a decision ("does this need a reply?"). The
+// GitHub digest went that way and needed a careful prompt plus a whole
+// fallback path to survive being wrong; here the useful and much easier job is
+// compression, where being a bit vague costs nothing and the user is one click
+// from the real message.
+#[allow(clippy::too_many_arguments)]
+pub fn summarize_mail(
+    endpoint: MailSummaryEndpoint<'_>,
+    sender: &str,
+    subject: &str,
+    body: &str,
+    is_reply: bool,
+) -> Result<Option<String>, String> {
+    let job = if is_reply {
+        "This is a reply to something the user sent. Say what the sender answered or decided."
+    } else {
+        "Say what the sender wants, and what (if anything) they are asking the user to do."
+    };
+
+    let prompt = format!(
+        "Summarize this email in at most two short sentences. {job}\n\n\
+         Write in the SAME LANGUAGE as the email itself. Do not translate it.\n\
+         Reply with the summary only — no preamble, no subject line, no greeting, \
+         no bullet points, no quoting.\n\n\
+         From: {sender}\n\
+         Subject: {subject}\n\n\
+         --- message ---\n{body}"
+    );
+
+    let reply = run_chat(
+        endpoint.base_url,
+        endpoint.model,
+        endpoint.api_key,
+        None,
+        &prompt,
+        endpoint.timeout_secs,
+        endpoint.think,
+        endpoint.max_tokens,
+    )?;
+
+    let trimmed = reply.trim();
+    // A summary longer than the message it summarizes means the model restated
+    // or quoted rather than compressed, and showing that in a notice is strictly
+    // worse than showing the message's own first lines.
+    if trimmed.is_empty() || trimmed.chars().count() >= body.chars().count() {
+        return Ok(None);
+    }
+    Ok(Some(truncate(trimmed, 400)))
+}
+
+/// The connection half of a summarize_mail call, grouped so the function keeps a
+/// readable signature (same reason ChatEndpoint exists above).
+pub struct MailSummaryEndpoint<'a> {
+    pub base_url: &'a str,
+    pub model: &'a str,
+    pub api_key: &'a str,
+    pub think: bool,
+    pub max_tokens: u32,
+    pub timeout_secs: u64,
+}
+
 // Ollama's OpenAI-compatibility shim (/v1/chat/completions) ignores the
 // "think" parameter for hybrid-thinking models — confirmed firsthand: the
 // identical request against Ollama's own native /api/chat with
@@ -636,8 +707,8 @@ fn turn_has_image(turn: &serde_json::Value) -> bool {
 
 /// Which server to talk to and how, for the streaming path.
 ///
-/// These five always travel together and are never chosen independently — they
-/// come from one profile the user selected. Passing them as one value keeps the
+/// These always travel together and are never chosen independently — they come
+/// from one profile the user selected. Passing them as one value keeps the
 /// stream functions down to what actually varies between calls (the messages,
 /// the tools, where the tokens go).
 pub(crate) struct ChatEndpoint<'a> {
@@ -646,6 +717,20 @@ pub(crate) struct ChatEndpoint<'a> {
     pub api_key: &'a str,
     pub think: bool,
     pub max_tokens: u32,
+    /// How long the whole request may take, first byte to last.
+    ///
+    /// Carried here rather than hardcoded because it was hardcoded at 120s and
+    /// that silently broke images: measured on this machine, asking a 9B vision
+    /// model about one screenshot took 166 seconds, so the request was cut off
+    /// mid-stream and the user was shown "stream read error: request or response
+    /// body error" — which says nothing about the real cause.
+    ///
+    /// It is a total, not a between-bytes, timeout: reqwest's blocking client
+    /// has no read timeout, so a long answer that is streaming perfectly well
+    /// counts against the same clock as a server that has hung. That is why the
+    /// default is generous. It can afford to be, now that Stop exists — before,
+    /// this timeout was the only way out of a reply you did not want.
+    pub timeout_secs: u64,
 }
 
 /// What one streamed request produced.
@@ -655,6 +740,7 @@ pub(crate) struct ChatEndpoint<'a> {
 /// than as an enum because a model that emits a sentence of preamble alongside
 /// its call should not have that sentence thrown away before the caller can
 /// decide what to do with it.
+#[derive(Default)]
 pub(crate) struct StreamOutcome {
     pub text: String,
     pub calls: Vec<crate::ai::tools::ToolCall>,
@@ -668,6 +754,33 @@ pub(crate) struct StreamOutcome {
 /// short enough that a runaway costs seconds rather than minutes — each round
 /// is a full request whose prompt has grown by the previous round's result.
 const MAX_TOOL_ROUNDS: usize = 5;
+
+/// Conversations the user has asked to stop, by chat id.
+///
+/// A set rather than a single id because nothing stops two windows from
+/// streaming at once, and cancelling one must not silently stop the other.
+fn cancelled() -> &'static Mutex<HashSet<String>> {
+    static CANCELLED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    CANCELLED.get_or_init(Default::default)
+}
+
+/// Stops the reply streaming into `chat_id`, keeping whatever arrived so far.
+///
+/// A local model can spend minutes on an answer to a question the user has
+/// already realised was wrong, and until this existed the only way out was to
+/// wait for it. What has been generated is kept rather than discarded: it is
+/// often most of an answer, and throwing it away would make stopping cost more
+/// than waiting.
+///
+/// Takes effect at the next token, not instantly — the stream is read on a
+/// blocking thread, so a model that has not emitted anything yet is only
+/// interrupted once it does. In practice that is the difference between
+/// stopping in milliseconds and stopping after the first token; it is not the
+/// difference between stopping and not stopping.
+#[tauri::command]
+pub fn cancel_chat_message(chat_id: String) {
+    cancelled().lock().unwrap().insert(chat_id);
+}
 
 // The chat UI's send button. Streams tokens back to the SAME window that
 // invoked it (never broadcast app-wide — a second chat conversation open
@@ -702,9 +815,19 @@ pub async fn send_chat_message(
             api_key: &api_key,
             think,
             max_tokens,
+            timeout_secs: crate::tunables::int(&app, crate::tunables::LLM_REPLY_TIMEOUT) as u64,
         };
         let specs = crate::ai::tools::specs(&app);
         let offered: Vec<serde_json::Value> = specs.iter().map(|s| s.to_wire()).collect();
+
+        // Cleared rather than trusted to be empty: a cancel that arrived after
+        // the previous reply had already finished leaves the id behind, and
+        // that stale entry would stop the next reply before its first token.
+        cancelled().lock().unwrap().remove(&chat_id);
+        let stop = {
+            let id = chat_id.clone();
+            move || cancelled().lock().unwrap().contains(&id)
+        };
 
         let mut answer = String::new();
         for round in 0..=MAX_TOOL_ROUNDS {
@@ -723,6 +846,7 @@ pub async fn send_chat_message(
                     let _ = window
                         .emit("chat-stream-chunk", json!({ "chat_id": &chat_id, "delta": delta }));
                 },
+                &stop,
             );
 
             let outcome = match result {
@@ -730,9 +854,18 @@ pub async fn send_chat_message(
                 Err(error) => {
                     let _ = window
                         .emit("chat-stream-error", json!({ "chat_id": chat_id, "error": error }));
+                    cancelled().lock().unwrap().remove(&chat_id);
                     return;
                 }
             };
+
+            // Checked before the tool calls are looked at, not after: a stream
+            // cut off mid-call leaves a half-parsed call behind, and running it
+            // would be the widget doing work for a turn the user just stopped.
+            if stop() {
+                answer = outcome.text;
+                break;
+            }
 
             if outcome.calls.is_empty() {
                 answer = outcome.text;
@@ -761,10 +894,18 @@ pub async fn send_chat_message(
             }
         }
 
+        // Always the same terminal event, cancelled or not: the frontend has one
+        // place that puts the composer back, and a second ending to handle would
+        // be a second way to leave it stuck.
         let _ = window.emit(
             "chat-stream-done",
-            json!({ "chat_id": chat_id, "full_text": strip_model_artifacts(&answer) }),
+            json!({
+                "chat_id": &chat_id,
+                "full_text": strip_model_artifacts(&answer),
+                "stopped": stop(),
+            }),
         );
+        cancelled().lock().unwrap().remove(&chat_id);
     })
     .await
 }
@@ -777,11 +918,19 @@ pub async fn send_chat_message(
 // handful of chunks from a native attempt that then errors out mid-stream
 // (rather than failing before any output) is accepted as it mirrors the
 // same probe-then-fallback tradeoff the non-streaming path already makes.
+///
+/// `should_stop` is polled once per streamed chunk. It is a predicate rather
+/// than a channel or a token because the two loops below are plain blocking
+/// reads: there is nothing to select on, and the only moment either can notice
+/// anything is between two lines off the socket. Dropping the reader on the way
+/// out closes the connection, which is what actually tells the server to stop
+/// generating — returning the partial text alone would leave it working.
 pub(crate) fn run_chat_stream(
     endpoint: &ChatEndpoint<'_>,
     messages: &[serde_json::Value],
     tools: &[serde_json::Value],
     on_delta: &mut dyn FnMut(&str),
+    should_stop: &dyn Fn() -> bool,
 ) -> Result<StreamOutcome, String> {
     // Ollama's native /api/chat takes images via a separate per-message
     // `images` array, not inline in `content` — rather than juggling two
@@ -791,7 +940,8 @@ pub(crate) fn run_chat_stream(
     // vision-capable models.
     let has_image = messages.iter().any(turn_has_image);
     if !has_image {
-        if let Some(Ok(outcome)) = ollama_native_chat_stream(endpoint, messages, tools, on_delta)
+        if let Some(Ok(outcome)) =
+            ollama_native_chat_stream(endpoint, messages, tools, on_delta, should_stop)
         {
             // A turn that asked for a tool is a real result even though it
             // carries no text — checking only the text would send it down the
@@ -800,8 +950,14 @@ pub(crate) fn run_chat_stream(
                 return Ok(outcome);
             }
         }
+        // A stop before the first token leaves exactly the empty outcome the
+        // fallback exists for, and falling through would answer a cancellation
+        // by starting a second request. Nothing streamed, so nothing is lost.
+        if should_stop() {
+            return Ok(StreamOutcome::default());
+        }
     }
-    openai_chat_stream(endpoint, messages, tools, on_delta)
+    openai_chat_stream(endpoint, messages, tools, on_delta, should_stop)
 }
 
 fn ollama_native_chat_stream(
@@ -809,8 +965,9 @@ fn ollama_native_chat_stream(
     messages: &[serde_json::Value],
     tools: &[serde_json::Value],
     on_delta: &mut dyn FnMut(&str),
+    should_stop: &dyn Fn() -> bool,
 ) -> Option<Result<StreamOutcome, String>> {
-    let ChatEndpoint { base_url, model, api_key, think, .. } = *endpoint;
+    let ChatEndpoint { base_url, model, api_key, think, timeout_secs, .. } = *endpoint;
     if ollama_native_known_missing(base_url) {
         return None;
     }
@@ -828,7 +985,7 @@ fn ollama_native_chat_stream(
         }
         let mut req = reqwest::blocking::Client::new()
             .post(&url)
-            .timeout(std::time::Duration::from_secs(120))
+            .timeout(std::time::Duration::from_secs(timeout_secs))
             .json(&payload);
         if !api_key.trim().is_empty() {
             req = req.bearer_auth(api_key);
@@ -869,6 +1026,9 @@ fn ollama_native_chat_stream(
             if obj["done"].as_bool() == Some(true) {
                 break;
             }
+            if should_stop() {
+                break;
+            }
         }
         Ok(StreamOutcome { text: full, calls })
     })();
@@ -883,14 +1043,15 @@ fn openai_chat_stream(
     messages: &[serde_json::Value],
     tools: &[serde_json::Value],
     on_delta: &mut dyn FnMut(&str),
+    should_stop: &dyn Fn() -> bool,
 ) -> Result<StreamOutcome, String> {
-    let ChatEndpoint { base_url, model, api_key, think, max_tokens } = *endpoint;
+    let ChatEndpoint { base_url, model, api_key, think, max_tokens, timeout_secs } = *endpoint;
     let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
     let key = quirks_key(base_url, model);
     // The parameter retry happens before a single SSE line is read, so a
     // rejected request never produces a half-streamed answer the user has to
     // watch get discarded.
-    let resp = post_chat_request(&url, api_key, 120, &key, |q| {
+    let resp = post_chat_request(&url, api_key, timeout_secs, &key, |q| {
         let mut payload = json!({ "model": model, "messages": messages, "stream": true });
         apply_model_params(&mut payload, q, Some(max_tokens), think);
         if !tools.is_empty() {
@@ -920,6 +1081,9 @@ fn openai_chat_stream(
             }
         }
         partial.absorb(delta);
+        if should_stop() {
+            break;
+        }
     }
     Ok(StreamOutcome {
         text: full,

@@ -38,6 +38,13 @@
 #mascot[data-pip-state="assigned"] { --a: #58a9ff; }
 #mascot[data-pip-state="digest_ready"] { --a: #e8b04b; }
 #mascot[data-pip-state="welcome_back"] { --a: #ffc247; }
+/* Mail keeps the blue of the mail notices themselves (mail-notice.css), and a
+   reply keeps the green that marks one on the morning card — the pip and the
+   card it belongs to should not disagree about what colour mail is. */
+#mascot[data-pip-state="mail_new"] { --a: #58a6ff; }
+#mascot[data-pip-state="mail_reply"] { --a: #3fb950; }
+#mascot[data-pip-state="brief_ready"] { --a: #58a6ff; }
+#mascot[data-pip-state="meeting_soon"] { --a: #e8b04b; }
 
 .pip-row {
   display: flex;

@@ -1,0 +1,307 @@
+/* Mail and calendar notices (see mail-notice.js): the arriving-message /
+   meeting-starting pill, and the pinned morning brief card.
+
+   Kept separate from github-notice.css on purpose rather than sharing its
+   classes. The shared parts are genuinely shared and live in notice.css (the
+   grid geometry every state needs, and the one Close button in the DOM); what is
+   here is what differs, and either card can now be changed without reading the
+   other. */
+
+/* state-mail_notice: the one-line pill for an arriving message or a meeting
+   about to start. Content-sized like the GitHub notice — a long subject plus a
+   summary grows the pill rather than being clipped — but taller, because the
+   second line here is a summary that legitimately wraps where an issue notice's
+   is a fixed string. */
+.state-mail_notice #mascot {
+  width: fit-content;
+  min-width: 280px;
+  max-width: 580px;
+  height: fit-content;
+  min-height: 92px;
+  max-height: 280px;
+  border-radius: 26px;
+  transition: border-color 0.25s ease, filter 0.15s ease;
+}
+
+.state-mail_notice .notice {
+  display: flex;
+  color: #fff;
+  font-family: -apple-system, "Segoe UI", sans-serif;
+  cursor: pointer;
+  overflow-y: auto;
+  /* An explicit px cap, NOT `max-height: 100%`. Percentage heights resolve
+     against the containing block's height, and #mascot's height here is
+     `fit-content` — indefinite — so per spec a percentage is ignored entirely
+     and the notice grows past the window. This is #mascot's own max-height
+     above minus its padding. Same trap as .state-github_digest .notice; it is
+     restated rather than cross-referenced because the number differs. */
+  max-height: 240px;
+}
+
+.mail-notice {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 14px;
+}
+
+.mail-notice svg {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+}
+
+.mail-notice-text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  min-width: 0;
+}
+
+/* Who it is from, or when it starts — the thing that says whether the rest is
+   worth reading, so it is small and quiet rather than competing with it. */
+.mail-notice-top {
+  font-size: 10px;
+  font-weight: 700;
+  color: #8b949e;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/* Which mailbox, appended to the top line when more than one is connected. Opts
+   out of that line's uppercasing: an address is long enough that upper-casing it
+   makes it shout over the sender's name it sits beside. */
+.mail-notice-account {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 600;
+  color: #6e7681;
+}
+
+.mail-notice-account::before {
+  content: " · ";
+}
+
+.mail-notice-main {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.45;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  max-width: 500px;
+}
+
+/* state-mail_brief: the pinned morning card. Like the GitHub digest it has no
+   auto-revert timer — it holds the notice lock until the Close button is
+   pressed (see closePinnedCard). */
+.state-mail_brief #mascot {
+  width: 520px;
+  height: fit-content;
+  min-height: 160px;
+  max-height: 560px;
+  border-radius: 22px;
+  padding: 22px 24px;
+  background: #0d0d0d;
+  border: 1px solid #262626;
+  transition: border-color 0.25s ease, filter 0.15s ease;
+}
+
+.state-mail_brief .notice {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  font-family: -apple-system, "Segoe UI", sans-serif;
+  text-align: left;
+  overflow-y: auto;
+  width: 100%;
+  padding-right: 4px;
+  /* Same explicit-px reasoning as above, sized for this state's 560px #mascot
+     max-height minus its padding and the Close button row. */
+  max-height: 460px;
+  /* Fades the last few pixels out instead of slicing a row cleanly in half at
+     the boundary, which read as a rendering bug rather than as "there is more
+     below". mask rather than a gradient overlay so it works over whatever row
+     background happens to be at the edge. */
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 18px), transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 18px), transparent 100%);
+}
+
+/* With nothing to scroll there is no "more below" to hint at, and the fade would
+   just dim the last row for no reason. */
+.state-mail_brief .notice:not(.is-scrollable) {
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+
+.state-mail_brief .notice::-webkit-scrollbar {
+  width: 7px;
+}
+
+.state-mail_brief .notice::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.state-mail_brief .notice::-webkit-scrollbar-thumb {
+  background: #3a3a3a;
+  border-radius: 7px;
+}
+
+.state-mail_brief .card-close-btn:hover {
+  border-color: #58a6ff;
+  color: #58a6ff;
+}
+
+/* Sticky rather than just first: this list scrolls, and a card whose own title
+   scrolls off the top leaves nothing on screen saying what it is. Needs an
+   opaque background matching #mascot's, or the rows would show through it as
+   they pass underneath. */
+.brief-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #262626;
+  background: #0d0d0d;
+  color: #eee;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.brief-header svg {
+  width: 20px;
+  height: 20px;
+}
+
+/* The mascot sits beside the card's title rather than floating halfway down its
+   left edge, which is where the shared `align-self: center` in notice.css puts
+   it once the card is tall. Same complaint as the GitHub notices had before
+   their icon was lined up: centred against a tall box reads as an accident.
+   The margin lines its 24px canvas up with the middle of the 34px header row. */
+.state-mail_brief .pip-row {
+  align-self: start;
+  margin-top: 5px;
+}
+
+.brief-unread {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-self: flex-start;
+  color: #bbb;
+  font-size: 12px;
+  font-weight: 600;
+  background: #1c1c1c;
+  border: 1px solid #2e2e2e;
+  border-radius: 20px;
+  padding: 5px 14px;
+}
+
+/* The card has two halves (today's meetings, then mail) and either can be
+   empty, so each is labelled — without it, a card showing only meetings reads
+   as a strangely formatted mail list. */
+.brief-section-label {
+  flex: 0 0 auto;
+  color: #6e7681;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-top: 2px;
+}
+
+.brief-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.brief-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  color: #ddd;
+  font-size: 13.5px;
+  line-height: 1.5;
+  background: #161616;
+  border: 1px solid #232323;
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.brief-row--clickable {
+  cursor: pointer;
+}
+
+.brief-row--clickable:hover {
+  border-color: #3a3a3a;
+  background: #1a1a1a;
+}
+
+.brief-clock {
+  flex: 0 0 auto;
+  color: #e8b04b;
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  padding-top: 1px;
+}
+
+.brief-dot {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  margin-top: 7px;
+  border-radius: 50%;
+  background: #58a6ff;
+}
+
+/* A reply to something the user sent is the one row on this card they are
+   actively waiting on, so it is the one that carries a colour. */
+.brief-row--reply .brief-dot {
+  background: #3fb950;
+  box-shadow: 0 0 0 3px rgba(63, 185, 80, 0.2);
+}
+
+.brief-row-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.brief-row-text strong {
+  font-weight: 700;
+  color: #eee;
+}
+
+.brief-row-detail {
+  color: #9aa4b0;
+  font-size: 12.5px;
+}
+
+/* Which mailbox a row came from. Only rendered when more than one account is
+   connected (the backend sends an empty label otherwise), and deliberately a
+   quiet chip on its own line: it is how you tell two rows apart, not what the
+   row is about. align-self keeps it as wide as the address rather than as wide
+   as the row. */
+.brief-account {
+  align-self: flex-start;
+  margin-top: 3px;
+  color: #7d8794;
+  font-size: 10.5px;
+  font-weight: 600;
+  background: #1c1c1c;
+  border: 1px solid #2a2a2a;
+  border-radius: 5px;
+  padding: 1px 6px;
+}

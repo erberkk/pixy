@@ -13,7 +13,10 @@ import {
   chatMainEl,
   chatMessagesEl,
   chatTitleInput,
-  chatModelSelect,
+  chatModelPicker,
+  chatModelBtn,
+  chatModelLabel,
+  chatModelMenu,
   chatInput,
   chatSendBtn,
   chatComposerEl,
@@ -48,32 +51,72 @@ async function loadLlmProfiles() {
   renderModelSelect();
 }
 
-function renderModelSelect() {
-  chatModelSelect.innerHTML = "";
-  if (llmProfiles.length === 0) {
-    const opt = document.createElement("option");
-    opt.value = "";
-    opt.textContent = "No model configured";
-    chatModelSelect.appendChild(opt);
-    chatModelSelect.disabled = true;
-    return;
-  }
-  chatModelSelect.disabled = false;
-  for (const p of llmProfiles) {
-    const opt = document.createElement("option");
-    opt.value = p.id;
-    opt.textContent = p.label || p.model || "(untitled)";
-    chatModelSelect.appendChild(opt);
-  }
-  chatModelSelect.value = activeLlmProfileId;
+function profileName(profile) {
+  return profile.label || profile.model || "(untitled)";
 }
 
-chatModelSelect.addEventListener("change", () => {
-  activeLlmProfileId = chatModelSelect.value;
+function renderModelSelect() {
+  chatModelBtn.disabled = llmProfiles.length === 0;
+  if (llmProfiles.length === 0) {
+    chatModelLabel.textContent = "No model configured";
+    chatModelMenu.innerHTML = "";
+    return;
+  }
+  const active = llmProfiles.find((p) => p.id === activeLlmProfileId) || llmProfiles[0];
+  chatModelLabel.textContent = profileName(active);
+  chatModelMenu.innerHTML = llmProfiles
+    .map(
+      (p) =>
+        '<button type="button" role="option" class="chat-model-option' +
+        (p.id === active.id ? " selected" : "") +
+        '" data-id="' +
+        escapeAttr(p.id) +
+        '" aria-selected="' +
+        (p.id === active.id) +
+        '">' +
+        // The model name under the label, because two profiles are often the
+        // same server with different models and the label alone cannot say so.
+        "<span>" +
+        escapeHtml(profileName(p)) +
+        "</span>" +
+        (p.label && p.model ? '<span class="chat-model-option-sub">' + escapeHtml(p.model) + "</span>" : "") +
+        "</button>"
+    )
+    .join("");
+}
+
+function setModelMenuOpen(open) {
+  chatModelPicker.classList.toggle("open", open);
+  chatModelBtn.setAttribute("aria-expanded", String(open));
+}
+
+chatModelBtn.addEventListener("click", () => {
+  setModelMenuOpen(!chatModelPicker.classList.contains("open"));
+});
+
+chatModelMenu.addEventListener("click", (event) => {
+  const option = event.target.closest(".chat-model-option");
+  if (!option) return;
+  activeLlmProfileId = option.dataset.id;
+  setModelMenuOpen(false);
+  renderModelSelect();
   invoke("set_active_llm_profile", { profileId: activeLlmProfileId });
   // The picture that was fine a moment ago may be unreadable to the model just
   // picked, or the other way round.
   refreshVisionWarning();
+});
+
+// A native <select> closed itself on Escape and on a click elsewhere; a div has
+// to be told. Captured on document rather than the picker so a click that lands
+// on any other control closes it before that control reacts.
+document.addEventListener("click", (event) => {
+  if (!chatModelPicker.contains(event.target)) setModelMenuOpen(false);
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && chatModelPicker.classList.contains("open")) {
+    setModelMenuOpen(false);
+    chatModelBtn.focus();
+  }
 });
 
 export async function loadChatMode() {
@@ -232,16 +275,16 @@ async function openChat(id) {
   // would pin a recall note to whatever message happens to sit at that position
   // in the next one.
   recalledByIndex = new Map();
-  webSourcesByIndex = new Map();
   generatedByIndex = new Map();
   chatTitleInput.value = chat.title || "";
   pendingAttachments = [];
   renderPendingAttachments();
   if (chat.profile_id && llmProfiles.some((p) => p.id === chat.profile_id)) {
     activeLlmProfileId = chat.profile_id;
-    chatModelSelect.value = chat.profile_id;
+    renderModelSelect();
   }
-  renderMessages();
+  // Opening a conversation shows its end, whatever the last one was scrolled to.
+  renderMessages({ scroll: "bottom" });
   renderChatList();
   // Pictures are read back afterwards rather than before the first paint: the
   // conversation should appear at once, with each picture filling in as it
@@ -253,7 +296,6 @@ function newChat() {
   activeChatId = null;
   activeChatMessages = [];
   recalledByIndex = new Map();
-  webSourcesByIndex = new Map();
   generatedByIndex = new Map();
   chatTitleInput.value = "";
   pendingAttachments = [];
@@ -295,10 +337,6 @@ function recallNoteHtml(index) {
     .join(", ");
   return `<div class="chat-recall-note" title="Added to this question from your earlier conversations">↩ ${items}</div>`;
 }
-
-// What the model looked at on the web to answer a given message index. Session
-// only, for the same reason as recalledByIndex above.
-let webSourcesByIndex = new Map();
 
 // Data URLs for generated pictures, by message index. The chat file stores only
 // the path (see ChatMessage.image_path), so reopening a conversation refills
@@ -352,8 +390,11 @@ async function loadGeneratedImages() {
   if (any) renderMessages();
 }
 
-function webSourcesHtml(index) {
-  const sources = webSourcesByIndex.get(index);
+// Read off the message rather than a side map, so reopening a conversation still
+// shows what it was answered from — see ChatMessage.sources for why these are
+// saved where the recall note beside them is not.
+function webSourcesHtml(message) {
+  const sources = message.sources;
   if (!sources?.length) return "";
   // Real links, not just names: the whole value of showing these is that the
   // user can open one and see whether the answer is actually in it. Opened
@@ -389,9 +430,11 @@ function messageAttachmentsHtml(message, index) {
           ? "image"
           : `${lines.toLocaleString()} line${lines === 1 ? "" : "s"}` +
             (a.full_chars > a.text.length ? " · truncated" : "");
-      // An image's bytes are not persisted, so there is nothing to open — only
-      // text attachments are clickable, and the card says so by not offering it.
-      const clickable = a.kind !== "image" && a.text;
+      // Openable when there is something behind the card: a text attachment
+      // carries its own contents, an image carries a path to the file it was
+      // written to. Images attached before that path existed have neither, and
+      // the card says so by not offering to open.
+      const clickable = a.kind === "image" ? Boolean(a.path) : Boolean(a.text);
       return (
         '<button type="button" class="chat-msg-attachment' +
         (clickable ? " clickable" : "") +
@@ -418,10 +461,33 @@ function messageAttachmentsHtml(message, index) {
 
 // The attachment viewer. A dialog rather than a panel, because the contents can
 // be long and the point is to read them without the conversation moving.
-function openAttachmentViewer(messageIndex, attachmentIndex) {
+async function openAttachmentViewer(messageIndex, attachmentIndex) {
   const attachment = activeChatMessages[messageIndex]?.attachments?.[attachmentIndex];
-  if (!attachment?.text) return;
+  if (!attachment) return;
   const dialog = el("attachmentViewer");
+
+  // A picture is shown, not fenced. Read from disk at open time rather than held
+  // in memory: a conversation with a dozen screenshots in it would otherwise
+  // carry all of them the whole time it is open, to show one on demand.
+  if (attachment.kind === "image") {
+    if (!attachment.path) return;
+    el("attachmentViewerName").textContent = attachment.name;
+    el("attachmentViewerMeta").textContent = "image";
+    const src = await invoke("read_generated_image", { path: attachment.path }).catch(() => null);
+    if (!src) {
+      showToast("That picture is no longer on disk");
+      return;
+    }
+    const img = document.createElement("img");
+    img.className = "attachment-viewer-image";
+    img.src = src;
+    img.alt = attachment.name;
+    el("attachmentViewerBody").replaceChildren(img);
+    dialog.showModal();
+    return;
+  }
+
+  if (!attachment.text) return;
   el("attachmentViewerName").textContent = attachment.name;
   const lines = attachment.text.split("\n").length;
   el("attachmentViewerMeta").textContent =
@@ -437,52 +503,139 @@ function openAttachmentViewer(messageIndex, attachmentIndex) {
   dialog.showModal();
 }
 
-function renderMessages() {
-  // Markdown-rendered (tables/bold/code fences/etc, see markdownToHtml —
-  // shared with the notes preview) — only reached once per full render, not
-  // per streamed token (see the chat-stream-chunk listener below), so
-  // re-parsing markdown here never competes with a token actually arriving.
-  chatMessagesEl.innerHTML = activeChatMessages
-    .map(
-      (m, index) =>
-        '<div class="chat-msg ' +
-        m.role +
-        (m.source === "voice" ? " voice" : "") +
-        '">' +
-        recallNoteHtml(index) +
-        '<div class="chat-msg-bubble">' +
-        markdownToHtml(m.content) +
+// One message, as HTML. Split out of renderMessages so a single turn can be
+// repainted without rebuilding the list — see renderLastMessage.
+function messageHtml(m, index) {
+  // An assistant turn with nothing in it yet is the gap between pressing send
+  // and the first token, which on a local model is routinely ten seconds or
+  // more. A blinking caret was the only sign anything was happening, and it
+  // looks identical to a reply that has stalled.
+  const isWaiting = m.role === "assistant" && !m.content && streamingChatId;
+  // A /image turn carries a picture and no text, and the empty bubble it used to
+  // get was a bordered box of nothing sitting on top of the image.
+  const hasBubble = Boolean(m.content) || isWaiting || m.source === "voice";
+  return (
+    '<div class="chat-msg ' +
+    m.role +
+    (m.source === "voice" ? " voice" : "") +
+    '">' +
+    recallNoteHtml(index) +
+    // Who is talking. Needed since the assistant's reply stopped being a bubble:
+    // alignment alone distinguished them before, and a full-width answer has no
+    // alignment to read. Only on the assistant — a right-aligned tinted bubble
+    // is already unmistakably your own.
+    (m.role === "assistant"
+      ? '<div class="chat-msg-role">' +
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
+        'stroke-linecap="round" stroke-linejoin="round">' +
+        '<rect x="4" y="8" width="16" height="12" rx="3"/>' +
+        '<path d="M12 4v4M9 14h.01M15 14h.01"/></svg>' +
+        "<span>Assistant</span></div>"
+      : "") +
+    (hasBubble
+      ? '<div class="chat-msg-bubble">' +
+        (isWaiting
+          ? '<span class="chat-thinking"><i></i><i></i><i></i></span>'
+          : markdownToHtml(m.content)) +
         // Spoken turns are marked because they are read differently: a user
         // message is a speech-recognition guess rather than something typed
         // deliberately, so an odd-looking exchange is usually the transcript's
         // fault, not the model's.
         (m.source === "voice" ? '<span class="chat-msg-tag">voice</span>' : "") +
-        "</div>" +
-        // Attached files as cards above the actions, not as text inside the
-        // bubble. Clicking one opens its contents; the transcript stays about
-        // what was asked.
-        messageAttachmentsHtml(m, index) +
-        // A picture this turn produced, if it was a /image command.
-        generatedImageHtml(m, index) +
-        // Pages the model read to write this. Below the bubble, like the recall
-        // note above it: neither is something the model said, both are why it
-        // knew.
-        webSourcesHtml(index) +
-        // Copies the message's own markdown source, not the rendered HTML —
-        // read from activeChatMessages by index rather than scraped back out of
-        // the DOM, so what lands on the clipboard is exactly what the model
-        // wrote, fences and all.
-        '<div class="chat-msg-actions">' +
-        '<button class="chat-msg-copy" type="button" data-index="' +
-        index +
-        '" title="Copy this message">Copy</button>' +
-        "</div>" +
         "</div>"
-    )
-    .join("");
+      : "") +
+    // Attached files as cards above the actions, not as text inside the bubble.
+    // Clicking one opens its contents; the transcript stays about what was asked.
+    messageAttachmentsHtml(m, index) +
+    // A picture this turn produced, if it was a /image command.
+    generatedImageHtml(m, index) +
+    // Pages the model read to write this. Below the bubble, like the recall note
+    // above it: neither is something the model said, both are why it knew.
+    webSourcesHtml(m) +
+    // Copies the message's own markdown source, not the rendered HTML — read
+    // from activeChatMessages by index rather than scraped back out of the DOM,
+    // so what lands on the clipboard is exactly what the model wrote, fences and
+    // all.
+    //
+    // Retry and Edit are always in the markup and hidden by CSS while a reply is
+    // streaming, rather than left out and added on the next render. Rendering
+    // them conditionally is what forced a full rebuild of the list at the end of
+    // every answer, and that rebuild is what threw away the reader's scroll
+    // position and text selection.
+    '<div class="chat-msg-actions">' +
+    '<button class="chat-msg-copy" type="button" data-index="' +
+    index +
+    '" title="Copy this message">Copy</button>' +
+    // Only on the last answer. Retrying an earlier one would have to throw away
+    // every turn after it, which is a different and much more destructive action
+    // than the word suggests.
+    (m.role === "assistant" && index === activeChatMessages.length - 1
+      ? '<button class="chat-msg-action" type="button" data-retry="1" ' +
+        'title="Ask the model again, same question">Retry</button>'
+      : "") +
+    // On the question rather than the answer: a bad reply is usually a badly-put
+    // question, and retyping it by hand was the only way to change one. Editing
+    // drops this turn and everything after it — said out loud in the tooltip,
+    // because that is not recoverable.
+    (m.role === "user"
+      ? '<button class="chat-msg-action" type="button" data-edit="' +
+        index +
+        '" title="Put this back in the box and drop everything after it">Edit</button>'
+      : "") +
+    "</div>" +
+    "</div>"
+  );
+}
+
+// Rebuilds the whole transcript. Callers say whether the view should follow the
+// bottom, because doing it unconditionally is a bug: the streaming path already
+// checks chatNearBottom() before scrolling, and then this threw that away by
+// jumping anyway on the render at the end of the turn — so reading something
+// further up got yanked to the end the moment the answer finished.
+function renderMessages({ scroll = "auto" } = {}) {
+  // Markdown-rendered (tables/bold/code fences/etc, see markdownToHtml — shared
+  // with the notes preview) — only reached once per full render, not per
+  // streamed token (see the chat-stream-chunk listener below), so re-parsing
+  // markdown here never competes with a token actually arriving.
+  const follow = scroll === "bottom" || (scroll === "auto" && chatNearBottom());
+  chatMessagesEl.innerHTML = activeChatMessages.map(messageHtml).join("");
   chatMainEl.classList.toggle("has-active", activeChatMessages.length > 0);
+  if (follow) scrollToBottom();
+  updateScrollDownButton();
+}
+
+// Repaints only the final turn, leaving every earlier node — and so the
+// selection inside it, and the scroll position — untouched. This is what the end
+// of a reply uses: everything that changes then (the markdown, the sources, the
+// Retry button) belongs to that one message.
+function renderLastMessage() {
+  const index = activeChatMessages.length - 1;
+  const node = chatMessagesEl.lastElementChild;
+  if (index < 0 || !node) {
+    renderMessages();
+    return;
+  }
+  const follow = chatNearBottom();
+  node.outerHTML = messageHtml(activeChatMessages[index], index);
+  if (follow) scrollToBottom();
+  updateScrollDownButton();
+}
+
+function scrollToBottom() {
   chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
 }
+
+// Shown whenever the end is off screen — including while a reply streams into a
+// part of the transcript the reader has scrolled away from, which is exactly
+// when it is most wanted.
+function updateScrollDownButton() {
+  el("chatScrollDown").classList.toggle("visible", !chatNearBottom());
+}
+
+chatMessagesEl.addEventListener("scroll", updateScrollDownButton);
+el("chatScrollDown").addEventListener("click", () => {
+  chatMessagesEl.scrollTo({ top: chatMessagesEl.scrollHeight, behavior: "smooth" });
+});
 
 function lastBubbleEl() {
   const bubbles = chatMessagesEl.querySelectorAll(".chat-msg-bubble");
@@ -711,7 +864,7 @@ async function generateImageTurn(prompt) {
   activeChatMessages.push({ role: "user", content: "/image " + prompt, ts: Date.now() });
   activeChatMessages.push({ role: "assistant", content: "", ts: Date.now() });
   const index = activeChatMessages.length - 1;
-  renderMessages();
+  renderMessages({ scroll: "bottom" });
   const bubble = lastBubbleEl();
   if (bubble) {
     bubble.innerHTML = '<span class="chat-tool-running">Drawing — ' + escapeHtml(prompt) + "</span>";
@@ -725,8 +878,17 @@ async function generateImageTurn(prompt) {
     generatedByIndex.set(index, image.data_url);
     activeChatMessages[index].content = "";
     activeChatMessages[index].image_path = image.path;
+    // The seed is part of the record, not decoration: it is the only way back to
+    // a picture you liked. Absent when the server was a generic one that does not
+    // take a seed, in which case saying nothing is honest — see GeneratedImage.
     activeChatMessages[index].image_meta =
-      image.width + "×" + image.height + " · " + image.seconds.toFixed(1) + "s";
+      image.width +
+      "×" +
+      image.height +
+      " · " +
+      image.seconds.toFixed(1) +
+      "s" +
+      (image.seed === null || image.seed === undefined ? "" : " · seed " + image.seed);
   } catch (err) {
     activeChatMessages[index].content = "⚠ " + String(err);
   }
@@ -784,14 +946,23 @@ async function sendChatMessage() {
   }
   const displayContent = text;
   // An image's base64 is deliberately not persisted — it would grow the chat
-  // file without bound, and a later turn cannot re-send it anyway.
-  const storedAttachments = attachments.map((a) => ({
-    name: a.name,
-    lang: a.lang,
-    kind: a.kind,
-    text: a.kind === "image" ? "" : a.data,
-    full_chars: a.full_chars,
-  }));
+  // file without bound, and a later turn cannot re-send it anyway. The bytes are
+  // written to the pictures folder instead and the message keeps the path, so
+  // the card in the transcript still opens the picture a week later. A failed
+  // write costs the preview, not the message: the turn goes out either way.
+  const storedAttachments = await Promise.all(
+    attachments.map(async (a) => ({
+      name: a.name,
+      lang: a.lang,
+      kind: a.kind,
+      text: a.kind === "image" ? "" : a.data,
+      full_chars: a.full_chars,
+      path:
+        a.kind === "image"
+          ? await invoke("save_attached_image", { name: a.name, data: a.data }).catch(() => "")
+          : "",
+    }))
+  );
 
   // Started here, before the message is rendered and written to disk, and
   // awaited much further down — so the lookup runs alongside that work instead
@@ -820,11 +991,23 @@ async function sendChatMessage() {
   });
   chatInput.value = "";
   autoResizeChatInput();
-  renderMessages();
+  // Following the bottom is right here and only here: you just pressed send, so
+  // the message you are looking for is the one at the end.
+  renderMessages({ scroll: "bottom" });
   await persistActiveChat();
 
+  await runAssistantTurn(profile, { wireContent, recallPromise });
+}
+
+// Streams one reply into a fresh assistant message, for whatever state
+// activeChatMessages is in — which must already end with the turn to answer.
+//
+// Split out of sendChatMessage because sending, retrying and editing all do
+// exactly this once the transcript says what the user wants answered; the only
+// thing that differs is how it got into that state.
+async function runAssistantTurn(profile, { wireContent, recallPromise } = {}) {
   sendingMessage = true;
-  chatSendBtn.disabled = true;
+  updateComposerState();
   setPipState("chat_typing");
 
   const chatId = activeChatId;
@@ -836,13 +1019,17 @@ async function sendChatMessage() {
   // would quietly drop every file from the conversation after the turn it was
   // attached to — the model would answer "as we discussed in that file" having
   // never seen it twice.
-  const history = activeChatMessages.slice(0, -1).map((m) => ({
+  const history = activeChatMessages.map((m) => ({
     role: m.role,
     content: [m.content, (m.attachments || []).filter((a) => a.text).map(inlineAttachment).join("\n\n")]
       .filter(Boolean)
       .join("\n\n"),
   }));
-  history.push({ role: "user", content: wireContent });
+  // The turn being sent right now may carry images, which are content parts
+  // rather than text and exist only for this request (see storedAttachments).
+  // A retry has no override: the bytes were never saved, so it re-asks the
+  // question with the picture described only by its filename marker.
+  if (wireContent !== undefined) history[history.length - 1].content = wireContent;
 
   // Anything decided in an EARLIER conversation that bears on this message —
   // usually nothing, and nothing is what gets injected then.
@@ -857,7 +1044,7 @@ async function sendChatMessage() {
   // The endpoint goes with the query: recall takes text out of your own
   // conversations, and whether that may leave this machine depends on where the
   // answer is coming from (see recall.share_with_cloud in Settings > Advanced).
-  const recalled = await recallPromise;
+  const recalled = recallPromise ? await recallPromise : null;
   if (recalled?.block) history.unshift({ role: "system", content: recalled.block });
   // Attached to the answer this recall was for — activeChatMessages is about to
   // gain the assistant turn, so its index is the current length.
@@ -868,7 +1055,7 @@ async function sendChatMessage() {
   const systemPrompt = chatInstructionsInput.value.trim();
   if (systemPrompt) history.unshift({ role: "system", content: systemPrompt });
   activeChatMessages.push({ role: "assistant", content: "", ts: Date.now() });
-  renderMessages();
+  renderMessages({ scroll: "bottom" });
   const bubble = lastBubbleEl();
   if (bubble) bubble.classList.add("streaming");
 
@@ -888,14 +1075,88 @@ async function sendChatMessage() {
   }
 }
 
+// Asks the model to answer the same question again, replacing the reply that is
+// there. The old answer is dropped rather than kept beside the new one: this is
+// for when the reply was wrong, and a transcript that accumulates every rejected
+// attempt is worse to read than the one good answer.
+async function retryLastAnswer() {
+  if (sendingMessage) return;
+  const profile = llmProfiles.find((p) => p.id === activeLlmProfileId) || llmProfiles[0];
+  if (!profile) {
+    showToast("No LLM configured — add one in Settings");
+    return;
+  }
+  if (activeChatMessages.at(-1)?.role !== "assistant") return;
+  activeChatMessages.pop();
+  // The indexes of the side maps still point at the answer just removed; the new
+  // one lands at the same position, so its own recall note replaces this.
+  recalledByIndex.delete(activeChatMessages.length);
+  renderMessages();
+  await runAssistantTurn(profile);
+}
+
+// Puts a question back in the composer to be rewritten, and drops it along with
+// everything said after it.
+//
+// Truncating is the point rather than a side effect: the model answers the whole
+// transcript, so an edited question left sitting above its own old answer would
+// be asked in the presence of a reply to the question it no longer is.
+function editMessage(index) {
+  if (sendingMessage) return;
+  const message = activeChatMessages[index];
+  if (!message || message.role !== "user") return;
+  chatInput.value = message.content;
+  activeChatMessages = activeChatMessages.slice(0, index);
+  renderMessages();
+  persistActiveChat();
+  autoResizeChatInput();
+  chatInput.focus();
+  // To the end, not selected: this is a message to amend, and a selection would
+  // make the first keystroke delete it.
+  chatInput.setSelectionRange(chatInput.value.length, chatInput.value.length);
+  if (message.attachments?.length) {
+    showToast("Attachments aren't carried over — attach them again if they matter");
+  }
+}
+
+// Stops the reply mid-flight, keeping what has arrived (see llm.rs's
+// cancel_chat_message). The composer is NOT reset here: the backend still
+// answers with chat-stream-done, and letting that one path finish the turn is
+// what keeps a stop from leaving the box disabled forever.
+function stopGenerating() {
+  if (!sendingMessage || !streamingChatId) return;
+  invoke("cancel_chat_message", { chatId: streamingChatId });
+  chatSendBtn.disabled = true; // no second press while the stop lands
+}
+
 function finishStreaming() {
   streamingChatId = null;
   streamingText = "";
   sendingMessage = false;
   chatSendBtn.disabled = false;
+  updateComposerState();
   setPipState("chat_idle");
-  renderMessages();
+  // Only the turn that just finished — see renderLastMessage. Repainting the
+  // whole list here is what used to throw away the reader's place and any text
+  // they had selected.
+  renderLastMessage();
   persistActiveChat();
+}
+
+// The send button doubles as the stop button, rather than a second control that
+// is dead most of the time: while a reply is streaming, sending is exactly what
+// you cannot do, and stopping is the only thing you might want.
+const SEND_ICON = chatSendBtn.innerHTML;
+const STOP_ICON =
+  '<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="7" y="7" width="10" height="10" rx="2"/></svg>';
+
+function updateComposerState() {
+  chatSendBtn.classList.toggle("is-stop", sendingMessage);
+  chatSendBtn.title = sendingMessage ? "Stop generating" : "Send";
+  chatSendBtn.innerHTML = sendingMessage ? STOP_ICON : SEND_ICON;
+  // Retry and Edit are in the markup at all times and hidden from here, so that
+  // finishing a reply does not have to re-render the list just to add them.
+  chatMessagesEl.classList.toggle("is-streaming", sendingMessage);
 }
 
 listen("chat-stream-chunk", (event) => {
@@ -917,10 +1178,18 @@ listen("chat-stream-chunk", (event) => {
 });
 
 listen("chat-stream-done", (event) => {
-  const { chat_id, full_text } = event.payload;
+  const { chat_id, full_text, stopped } = event.payload;
   if (chat_id !== streamingChatId) return;
   const last = activeChatMessages[activeChatMessages.length - 1];
-  if (last && last.role === "assistant") last.content = full_text || streamingText;
+  if (last && last.role === "assistant") {
+    last.content = full_text || streamingText;
+    // Marked in the text itself rather than as a separate field on the message:
+    // it has to survive being saved and reopened, and a half-sentence with no
+    // explanation reads as the model having failed rather than as you having
+    // stopped it. An answer stopped before it said anything gets the note alone,
+    // which is the only thing that distinguishes it from an empty reply.
+    if (stopped) last.content = (last.content ? last.content + "\n\n" : "") + "_⏹ stopped_";
+  }
   finishStreaming();
 });
 
@@ -959,13 +1228,14 @@ listen("chat-tool-done", (event) => {
   const { chat_id, sources } = event.payload;
   if (chat_id !== streamingChatId) return;
   if (!sources?.length) return;
-  // Keyed to the assistant message being written, which is the last one — the
-  // same indexing recalledByIndex uses. Appended rather than replaced: two
+  // Written onto the assistant message being answered — the last one — so the
+  // save at the end of the turn carries it. Appended rather than replaced: two
   // rounds (search, then read one of the results) both belong to this answer.
-  const index = activeChatMessages.length - 1;
-  const existing = webSourcesByIndex.get(index) || [];
+  const message = activeChatMessages[activeChatMessages.length - 1];
+  if (!message) return;
+  const existing = message.sources || [];
   const seen = new Set(existing.map((s) => s.url));
-  webSourcesByIndex.set(index, existing.concat(sources.filter((s) => !seen.has(s.url))));
+  message.sources = existing.concat(sources.filter((s) => !seen.has(s.url)));
 });
 
 // Opened through the opener plugin, never as a link: a bare href inside a
@@ -981,7 +1251,19 @@ chatMessagesEl.addEventListener("click", (event) => {
   const reveal = event.target.closest(".chat-generated-open");
   const picture = event.target.closest(".chat-generated img");
   const path = reveal?.dataset.path || picture?.dataset.path;
-  if (path) invoke("open_generated_image", { path }).catch((err) => showToast(String(err)));
+  if (path) {
+    invoke("open_generated_image", { path }).catch((err) => showToast(String(err)));
+    return;
+  }
+  // Delegated like everything else here: the transcript is rebuilt from scratch
+  // on every render, so per-button listeners would have to be re-attached each
+  // time and would leak the ones belonging to messages that no longer exist.
+  if (event.target.closest("[data-retry]")) {
+    retryLastAnswer();
+    return;
+  }
+  const edit = event.target.closest("[data-edit]");
+  if (edit) editMessage(Number(edit.dataset.edit));
 });
 
 listen("chat-stream-error", (event) => {
@@ -1094,12 +1376,63 @@ chatInstructionsInput.addEventListener("blur", () => {
 });
 chatComposerEl.addEventListener("submit", (e) => {
   e.preventDefault();
-  sendChatMessage();
+  // The one button, two jobs — see updateComposerState.
+  if (sendingMessage) stopGenerating();
+  else sendChatMessage();
 });
+
+// A screenshot lives in the clipboard as a bitmap with no file behind it, so the
+// attach button — which opens a file picker — could never reach one. Text paste
+// is left completely alone: the handler only takes over when the clipboard holds
+// an image and no text at all, which is what Win+Shift+S and the clipboard
+// history put there. Copying from a page usually carries text/plain alongside
+// the picture, and pasting that should still paste the text.
+chatInput.addEventListener("paste", async (event) => {
+  const items = [...(event.clipboardData?.items || [])];
+  if (items.some((item) => item.type === "text/plain")) return;
+  const images = items.filter((item) => item.type.startsWith("image/"));
+  if (!images.length) return;
+  event.preventDefault();
+
+  for (const item of images) {
+    const blob = item.getAsFile();
+    if (!blob) continue;
+    const base64 = await blobToBase64(blob);
+    if (!base64) continue;
+    pendingAttachments.push({
+      // Named for when it was taken, because there is no filename to inherit and
+      // "image.png" three times over tells you nothing about which is which.
+      name: `pasted-${new Date().toTimeString().slice(0, 8).replace(/:/g, "")}.${
+        blob.type.split("/")[1] || "png"
+      }`,
+      kind: "image",
+      mime: blob.type,
+      data: base64,
+      problem: "",
+      lang: "",
+      // Only meaningful for text, where it is how truncation is detected.
+      full_chars: 0,
+    });
+  }
+  renderPendingAttachments();
+  refreshVisionWarning();
+});
+
+// The data: URL prefix is stripped because everything downstream — the card
+// thumbnail, the image_url content part — builds its own from `mime`.
+function blobToBase64(blob) {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(",")[1] || "");
+    reader.onerror = () => resolve("");
+    reader.readAsDataURL(blob);
+  });
+}
+
 chatInput.addEventListener("input", autoResizeChatInput);
 chatInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey) {
     e.preventDefault();
-    sendChatMessage();
+    if (!sendingMessage) sendChatMessage();
   }
 });

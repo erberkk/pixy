@@ -216,4 +216,27 @@ window.addEventListener("DOMContentLoaded", () => {
     markEventDuringSleep();
     pushEvent("digest_ready", 2000); // brief pulse — the actual digest card takes over right after (main.js)
   });
+
+  listen("mail-new", (event) => {
+    markEventDuringSleep();
+    // A reply to something you sent is the one kind of mail you were already
+    // waiting on, so it gets its own pose rather than the generic arrival one.
+    // 11s to match the notice's own lifetime (MAIL_NOTICE_MS): the postman
+    // should be on screen for exactly as long as the message it delivered, not
+    // vanish out from under it at the 8s default.
+    pushEvent(event.payload && event.payload.is_reply_to_me ? "mail_reply" : "mail_new", 11000);
+  });
+
+  listen("calendar-soon", () => {
+    markEventDuringSleep();
+    pushEvent("meeting_soon", 12000); // CALENDAR_NOTICE_MS
+  });
+
+  listen("daily-brief", () => {
+    markEventDuringSleep();
+    // The brief card is pinned — it has no timer, so neither can its pose. Held
+    // for far longer than anyone leaves the card up and ended explicitly when
+    // the card closes (see main.js), the same way the voice states do it.
+    pushEvent("brief_ready", 30 * 60 * 1000);
+  });
 });

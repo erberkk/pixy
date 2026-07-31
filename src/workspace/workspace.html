@@ -224,13 +224,15 @@
           <button class="icon-btn" id="memoryZoomInBtn" title="Zoom in">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3M11 8v6M8 11h6"/></svg>
           </button>
-          <button class="icon-btn" id="memoryResetViewBtn" title="Reset view">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 1 3 6.7"/><path d="M3 17v-5h5"/></svg>
+          <button class="icon-btn" id="memoryResetViewBtn" title="Fit every memory in view (0)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 8V5a2 2 0 012-2h3M16 3h3a2 2 0 012 2v3M21 16v3a2 2 0 01-2 2h-3M8 21H5a2 2 0 01-2-2v-3"/></svg>
           </button>
         </div>
 
         <div class="memory-graph-wrap" id="memoryGraphWrap">
-          <canvas id="memoryCanvas"></canvas>
+          <!-- Focusable so the graph can be panned and zoomed from the keyboard
+               (arrows / +- / 0), not by dragging only. -->
+          <canvas id="memoryCanvas" tabindex="0" aria-label="Memory graph"></canvas>
 
           <div class="memory-legend" id="memoryLegend"></div>
           <div class="memory-tooltip" id="memoryTooltip"></div>
@@ -255,10 +257,13 @@
             </button>
           </div>
 
+          <!-- Two different nothings, filled in by memory.js: no memory files at
+               all, or none that the current filters let through. They read very
+               differently and an empty canvas explains neither. -->
           <div class="memory-empty" id="memoryEmpty" style="display:none;">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/></svg>
-            <p>No memories yet</p>
-            <p>Claude will write memory files here as it learns things worth remembering across sessions.</p>
+            <p id="memoryEmptyTitle">No memories yet</p>
+            <p id="memoryEmptyBody">Claude will write memory files here as it learns things worth remembering across sessions.</p>
           </div>
 
           <div class="memory-detail" id="memoryDetail">
@@ -273,10 +278,15 @@
                 </button>
               </div>
             </div>
-            <h3 class="memory-detail-name" id="memoryDetailName"></h3>
-            <p class="memory-detail-desc" id="memoryDetailDesc"></p>
-            <div class="memory-detail-meta" id="memoryDetailMeta"></div>
-            <div class="memory-detail-body" id="memoryDetailBody"></div>
+            <!-- Only this part scrolls: the type badge, copy and close buttons
+                 above used to scroll away with a long memory, leaving no way to
+                 shut the panel without scrolling back up. -->
+            <div class="memory-detail-scroll">
+              <h3 class="memory-detail-name" id="memoryDetailName"></h3>
+              <p class="memory-detail-desc" id="memoryDetailDesc"></p>
+              <div class="memory-detail-meta" id="memoryDetailMeta"></div>
+              <div class="memory-detail-body" id="memoryDetailBody"></div>
+            </div>
           </div>
         </div>
       </main>
@@ -287,7 +297,16 @@
       <main class="main chat-main" id="chatMain" style="display:none;">
         <div class="topbar chat-topbar">
           <input class="title-input" id="chatTitleInput" placeholder="New chat" />
-          <select class="chat-model-select" id="chatModelSelect"></select>
+          <!-- A custom listbox rather than a <select>: a native one opens a
+               Windows-drawn popup, which is the one piece of system chrome
+               left in a window that draws everything else itself. -->
+          <div class="chat-model-picker" id="chatModelPicker">
+            <button type="button" class="chat-model-btn" id="chatModelBtn" aria-haspopup="listbox" aria-expanded="false">
+              <span id="chatModelLabel">No model configured</span>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+            </button>
+            <div class="chat-model-menu" id="chatModelMenu" role="listbox"></div>
+          </div>
           <div class="toolbar">
             <button class="icon-btn" id="chatInstructionsBtn" title="Custom instructions (applies to every chat)">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l1.9 4.5L18 9l-4.1 1.5L12 15l-1.9-4.5L6 9l4.1-1.5L12 3z"/><path d="M19 15l.8 1.9L22 18l-2.2.9L19 21l-.8-2.1L16 18l2.2-1.1L19 15z"/></svg>
@@ -315,8 +334,21 @@
         <div class="chat-body" id="chatBody">
           <div class="chat-messages" id="chatMessages"></div>
 
+          <!-- Appears only when the view is away from the end. Now that a
+               finished reply no longer drags the transcript to the bottom, this
+               is how you get back there. -->
+          <button type="button" class="chat-scroll-down" id="chatScrollDown" title="Jump to the latest message">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M19 12l-7 7-7-7"/></svg>
+          </button>
+
           <div class="chat-empty" id="chatEmpty">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l2.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z"/></svg>
+            <!-- A square-cornered bubble with a tail and three lines of text,
+                 rather than the lopsided round one that was here: at 42px the
+                 old path's tail read as a dent in the outline. -->
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 4h16a1 1 0 011 1v11a1 1 0 01-1 1H9l-5 4V5a1 1 0 011-1z"/>
+              <path d="M8 8.5h8M8 12h5"/>
+            </svg>
             <p>No chat selected</p>
             <p>Start a new conversation, or pick one from the sidebar.</p>
           </div>

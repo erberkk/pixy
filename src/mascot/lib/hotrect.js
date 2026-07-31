@@ -9,12 +9,23 @@ export function reportHotRect() {
   const scale = window.devicePixelRatio || 1;
   const pill = document.getElementById("mascot").getBoundingClientRect();
 
-  // The quick menu is anchored below the pill, but the pill's height changes
-  // with state (46px bar / 66px resting circle / 90px waiting panel). Since we
-  // are already measuring it here — on every state change, and again once the
-  // CSS transition settles — publish its bottom edge so the menu can sit the
-  // same distance under it in every state instead of being tuned for one.
-  document.documentElement.style.setProperty("--pill-bottom", pill.bottom + "px");
+  // The quick menu is anchored to the pill, whose box changes with state — 46px
+  // bar, 66px resting circle, 90px waiting panel, and up to 620x560 for a
+  // digest card. Since we are already measuring it here — on every state
+  // change, on right-click, and again once the CSS transition settles — publish
+  // the whole box, so the menu's position AND the width of its fan can be
+  // derived from the pill it belongs to instead of being tuned for one state.
+  const root = document.documentElement;
+  root.style.setProperty("--pill-top", pill.top + "px");
+  root.style.setProperty("--pill-bottom", pill.bottom + "px");
+  root.style.setProperty("--pill-center", pill.left + pill.width / 2 + "px");
+  root.style.setProperty("--pill-width", pill.width + "px");
+
+  // Room the fan needs under the pill. The window is a fixed 740x620 and does
+  // not grow, so under a tall card there is no room left below — the menu would
+  // be silently clipped off the bottom edge rather than moved, so it flips and
+  // fans upward instead.
+  root.classList.toggle("quick-menu-above", pill.bottom + 52 > window.innerHeight);
 
   const rects = [pill];
   const quickMenu = document.getElementById("quick-menu");

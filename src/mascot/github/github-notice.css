@@ -250,25 +250,9 @@
   background: #666;
 }
 
-.digest-close-btn {
-  display: none;
-}
-
-.state-github_digest .digest-close-btn {
-  display: block;
-  flex: 0 0 auto;
-  background: #262626;
-  border: 1px solid #444;
-  color: #ddd;
-  border-radius: 8px;
-  padding: 5px 16px;
-  font-size: 11px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.state-github_digest .digest-close-btn:hover {
-  background: #333;
+/* The button itself is styled in notice.css — it is one shared element. This is
+   only the digest's own accent on hover, matching its amber header. */
+.state-github_digest .card-close-btn:hover {
   border-color: #e8b04b;
   color: #e8b04b;
 }

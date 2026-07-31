@@ -104,6 +104,74 @@ export function lockNotice() {
   noticeLocked = true;
 }
 
-export function unlockNotice() {
+// Private now that closePinnedCard is the only way out of a pinned card —
+// releasing the lock without draining the queue would strand whatever is
+// waiting behind it, which is exactly the bug the queue exists to fix.
+function unlockNotice() {
   noticeLocked = false;
+}
+
+// Pinned cards waiting for the screen. There is exactly one notice area, and a
+// pinned card holds it until the user closes it — so before this queue existed,
+// a second card arriving while the first was up hit the isNoticeLocked() guard
+// and was dropped on the floor. That is not hypothetical: the GitHub digest and
+// the morning mail brief are both scheduled for the morning, and a machine that
+// was off at both their hours runs them minutes apart on the same catch-up.
+const pinnedQueue = [];
+
+// A card that has waited this long has stopped being news. Showing a "good
+// morning, here is your day" card at 6pm because nobody closed the one in front
+// of it is worse than not showing it at all.
+const QUEUE_STALE_MS = 2 * 60 * 60 * 1000;
+
+function present(card) {
+  clearRevertTimer();
+  lockNotice();
+  document.body.className = card.stateClass;
+  const notice = document.getElementById("notice");
+  card.render(notice);
+  // A card always opens at its top. Emptying and refilling a scrollable element
+  // does NOT reset its scroll position: the browser's scroll anchoring sees
+  // content appear above where it was looking and compensates by scrolling down
+  // to match. Measured on the morning brief — the second time it opened, it came
+  // up 163px down, with its own header off-screen above.
+  notice.scrollTop = 0;
+  reportHotRectSoon();
+}
+
+/// Shows a pinned card, or parks it until the screen is free.
+///
+/// `render` is given the notice element and is responsible for its own contents
+/// and its own sound — a queued card must not beep when it was queued, only when
+/// it actually appears.
+export function showPinnedCard(stateClass, render) {
+  const card = { stateClass, render, queuedAt: Date.now() };
+  if (noticeLocked) {
+    pinnedQueue.push(card);
+    return false;
+  }
+  present(card);
+  return true;
+}
+
+/// Closes whatever pinned card is showing and hands the screen to the next one.
+///
+/// Every path that dismisses a pinned card goes through here, including the
+/// agent permission card — which takes the notice area by preemption rather than
+/// by queueing (a held-open tool call cannot wait behind a digest), but still has
+/// to drain the queue on the way out or a card parked behind it would never
+/// appear at all.
+export function closePinnedCard() {
+  unlockNotice();
+
+  const now = Date.now();
+  while (pinnedQueue.length > 0) {
+    const next = pinnedQueue.shift();
+    if (now - next.queuedAt > QUEUE_STALE_MS) continue;
+    present(next);
+    return;
+  }
+
+  document.body.className = "state-idle";
+  reportHotRectSoon();
 }

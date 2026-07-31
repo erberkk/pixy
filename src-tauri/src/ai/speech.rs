@@ -6,12 +6,10 @@
 // This module is only the connection settings and server supervision. The
 // code that actually sends audio to these servers is ai/voice.rs, which reads
 // the profiles saved here.
-use std::sync::Mutex;
-
 use serde::{Deserialize, Serialize};
 
 use crate::config::{read_config, write_config, SttProfile, TtsProfile};
-use crate::ai::process::{autostart_if_needed, stop_tracked};
+use crate::ai::process::{autostart_if_needed, stop_local_server};
 
 #[derive(Serialize, Deserialize, Clone, Default)]
 pub struct SttSettings {
@@ -81,27 +79,38 @@ pub fn save_tts_settings(app: tauri::AppHandle, settings: TtsSettings) {
     write_config(&app, &cfg);
 }
 
-static STT_CHILD_PID: Mutex<Option<u32>> = Mutex::new(None);
-static TTS_CHILD_PID: Mutex<Option<u32>> = Mutex::new(None);
+// The endpoints the two speech servers are expected to answer on. Shared by the
+// startup spawn and the tray's stop-and-quit so the two cannot disagree about
+// which server they mean. Unlike the LLM there is no default to fall back on: a
+// speech server nobody has configured has no address to look for.
+fn stt_base_url(cfg: &crate::config::AppConfig) -> Option<String> {
+    cfg.stt_active_profile_id
+        .as_ref()
+        .and_then(|id| cfg.stt_profiles.iter().find(|p| &p.id == id))
+        .or_else(|| cfg.stt_profiles.first())
+        .map(|p| p.base_url.clone())
+}
+
+fn tts_base_url(cfg: &crate::config::AppConfig) -> Option<String> {
+    cfg.tts_active_profile_id
+        .as_ref()
+        .and_then(|id| cfg.tts_profiles.iter().find(|p| &p.id == id))
+        .or_else(|| cfg.tts_profiles.first())
+        .map(|p| p.base_url.clone())
+}
 
 pub fn maybe_autostart_stt(app: &tauri::AppHandle) {
     let cfg = read_config(app);
     if !cfg.stt_autostart {
         return;
     }
-    let Some(command) = cfg.stt_start_command.filter(|s| !s.trim().is_empty()) else {
+    let Some(command) = cfg.stt_start_command.clone().filter(|s| !s.trim().is_empty()) else {
         return;
     };
-    let Some(base_url) = cfg
-        .stt_active_profile_id
-        .as_ref()
-        .and_then(|id| cfg.stt_profiles.iter().find(|p| &p.id == id))
-        .or_else(|| cfg.stt_profiles.first())
-        .map(|p| p.base_url.clone())
-    else {
+    let Some(base_url) = stt_base_url(&cfg) else {
         return;
     };
-    autostart_if_needed(&base_url, &command, &STT_CHILD_PID);
+    autostart_if_needed(&base_url, &command);
 }
 
 pub fn maybe_autostart_tts(app: &tauri::AppHandle) {
@@ -109,22 +118,20 @@ pub fn maybe_autostart_tts(app: &tauri::AppHandle) {
     if !cfg.tts_autostart {
         return;
     }
-    let Some(command) = cfg.tts_start_command.filter(|s| !s.trim().is_empty()) else {
+    let Some(command) = cfg.tts_start_command.clone().filter(|s| !s.trim().is_empty()) else {
         return;
     };
-    let Some(base_url) = cfg
-        .tts_active_profile_id
-        .as_ref()
-        .and_then(|id| cfg.tts_profiles.iter().find(|p| &p.id == id))
-        .or_else(|| cfg.tts_profiles.first())
-        .map(|p| p.base_url.clone())
-    else {
+    let Some(base_url) = tts_base_url(&cfg) else {
         return;
     };
-    autostart_if_needed(&base_url, &command, &TTS_CHILD_PID);
+    autostart_if_needed(&base_url, &command);
 }
 
-pub fn stop_autostarted() {
-    stop_tracked(&STT_CHILD_PID);
-    stop_tracked(&TTS_CHILD_PID);
+/// Stops both speech servers for the tray's stop-and-quit, whoever started them —
+/// see process::stop_local_server.
+pub fn stop_servers(app: &tauri::AppHandle) {
+    let cfg = read_config(app);
+    for base_url in [stt_base_url(&cfg), tts_base_url(&cfg)].into_iter().flatten() {
+        stop_local_server(&base_url);
+    }
 }

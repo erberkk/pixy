@@ -459,33 +459,64 @@ fn format_thread(issue_body: &str, username: &str, thread: &[(String, String)]) 
     out
 }
 
+// A deterministic stand-in for the model's verdict, used whenever the model
+// cannot be asked (none configured) or did not answer (the call failed).
+//
+// It deliberately claims less than the model would — "there is discussion here
+// nobody has read for you" rather than "you owe an answer" — because nothing
+// has actually judged it. Saying that much is still far better than what this
+// replaces: an LLM failure used to drop the issue from the digest entirely, so
+// an issue with twelve new comments simply never appeared. A digest that
+// silently shrinks when a background call times out is worse than one that
+// admits it did not analyze something.
+fn unanalyzed_note(comments: u64, last_author: Option<&str>) -> String {
+    let plural = if comments == 1 { "comment" } else { "comments" };
+    match last_author {
+        Some(author) => format!("{comments} {plural}, last from @{author} (not analyzed)"),
+        None => format!("{comments} {plural} (not analyzed)"),
+    }
+}
+
 // Reads the ENTIRE thread per issue (not just the latest message) and asks
 // the LLM, in its own small isolated call, whether the assignee genuinely
 // still owes an action here — a per-issue call over one thread is a far
 // more tractable task for a small local model than asking one call to
 // reason correctly over 20+ issues at once (which reliably produced
 // "nothing needs attention" or an empty reply).
+//
+// `username` and `llm_cfg` are both optional because neither is required for
+// the digest to be worth showing: without them every issue that has discussion
+// still gets an unanalyzed_note, which is the whole point of this being a
+// degradation rather than an early return.
 fn enrich_with_issue_analysis(
     app: &tauri::AppHandle,
     token: &str,
-    username: &str,
-    llm_cfg: &crate::config::LlmProfile,
+    username: Option<&str>,
+    llm_cfg: Option<&crate::config::LlmProfile>,
     issues: &mut [GithubItem],
 ) {
-    if llm_cfg.model.trim().is_empty() {
-        append_debug_log(app, "issue-analysis: skipped entirely, no LLM model configured");
-        return;
-    }
     for issue in issues.iter_mut() {
         let tag = format!("{} #{}", issue.repo, issue.number);
         if issue.comments == 0 {
             append_debug_log(app, &format!("issue {tag}: skipped (0 comments, description-only)"));
             continue;
         }
-        let Some((body, thread)) = fetch_issue_thread(token, &issue.repo, issue.number) else {
-            append_debug_log(app, &format!("issue {tag}: skipped (failed to fetch thread)"));
+
+        // Nothing to ask, so don't pay for a thread fetch either — the comment
+        // count is already in the search result, and it is all the fallback
+        // note can honestly use.
+        let (Some(llm_cfg), Some(username)) = (llm_cfg, username) else {
+            append_debug_log(app, &format!("issue {tag}: unanalyzed (no model or no username)"));
+            issue.action_note = Some(unanalyzed_note(issue.comments, None));
             continue;
         };
+
+        let Some((body, thread)) = fetch_issue_thread(token, &issue.repo, issue.number) else {
+            append_debug_log(app, &format!("issue {tag}: unanalyzed (failed to fetch thread)"));
+            issue.action_note = Some(unanalyzed_note(issue.comments, None));
+            continue;
+        };
+        let last_author = thread.last().map(|(author, _)| author.clone());
         let transcript = format_thread(&body, username, &thread);
         if transcript.trim().is_empty() {
             append_debug_log(app, &format!("issue {tag}: skipped (empty transcript)"));
@@ -506,10 +537,26 @@ fn enrich_with_issue_analysis(
                 issue.action_note = Some(note);
             }
             Ok(None) => {
+                // The model read the thread and said no. That is a real
+                // verdict, so it is trusted — no fallback note here, or the
+                // analysis would never be able to remove anything.
                 append_debug_log(app, &format!("issue {tag}: NO_ACTION"));
             }
             Err(e) => {
                 append_debug_log(app, &format!("issue {tag}: LLM call failed — {e}"));
+                // The one judgement worth making without a model, and the same
+                // rule issue_watcher.rs already applies to comment notices: if
+                // the last word in the thread was the user's own, this is not
+                // sitting waiting on them.
+                if last_author
+                    .as_deref()
+                    .map(|author| author.eq_ignore_ascii_case(username))
+                    .unwrap_or(false)
+                {
+                    append_debug_log(app, &format!("issue {tag}: last comment is yours, not flagged"));
+                } else {
+                    issue.action_note = Some(unanalyzed_note(issue.comments, last_author.as_deref()));
+                }
             }
         }
     }
@@ -667,20 +714,28 @@ pub fn run_daily_digest(app: &tauri::AppHandle) {
         return;
     }
 
+    // A missing model no longer abandons the whole digest. Everything below
+    // except the per-issue notes — the workload line, every PR's review state,
+    // the stale roll-up — is computed here in Rust and never needed a model at
+    // all, so returning early threw most of the digest away in order to skip
+    // one optional enrichment.
     let llm_cfg = crate::ai::llm::get_active_llm_profile(app.clone());
-    if llm_cfg.model.trim().is_empty() {
-        append_debug_log(app, &format!("===== {ts} =====\nskipped: no LLM model configured"));
-        return;
+    let llm_cfg = (!llm_cfg.model.trim().is_empty()).then_some(llm_cfg);
+    if llm_cfg.is_none() {
+        append_debug_log(
+            app,
+            &format!("===== {ts} =====\nno LLM model configured — issue threads go unanalyzed, digest still runs"),
+        );
     }
 
     // Per-issue thread analysis — each is its own LLM call (see
     // enrich_with_issue_analysis), so this can genuinely take a while for a
     // big backlog. That's accepted: this only runs once a day.
-    if let Ok(username) = fetch_username(&token) {
-        enrich_with_issue_analysis(app, &token, &username, &llm_cfg, &mut issues);
-    } else {
-        append_debug_log(app, &format!("===== {ts} =====\nfailed to fetch username, skipping issue analysis"));
+    let username = fetch_username(&token).ok();
+    if username.is_none() {
+        append_debug_log(app, &format!("===== {ts} =====\nfailed to fetch username, issues go unanalyzed"));
     }
+    enrich_with_issue_analysis(app, &token, username.as_deref(), llm_cfg.as_ref(), &mut issues);
 
     let report = GithubReport { issues, pull_requests };
     let summary = build_final_digest(
@@ -732,4 +787,101 @@ pub fn start_daily_digest_watcher(app: tauri::AppHandle) {
 // on-screen button; this isn't meant to be something the user babysits).
 pub fn run_github_digest_now(app: tauri::AppHandle) {
     std::thread::spawn(move || run_daily_digest(&app));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fresh() -> String {
+        chrono::Utc::now().to_rfc3339()
+    }
+
+    fn item(repo: &str, number: u64, comments: u64) -> GithubItem {
+        GithubItem {
+            number,
+            title: format!("Issue {number}"),
+            url: format!("https://github.com/{repo}/issues/{number}"),
+            repo: repo.to_string(),
+            state: "open".to_string(),
+            updated_at: fresh(),
+            comments,
+            review_state: None,
+            review_body: None,
+            action_note: None,
+        }
+    }
+
+    #[test]
+    fn unanalyzed_note_reads_as_a_count_not_a_verdict() {
+        assert_eq!(unanalyzed_note(1, None), "1 comment (not analyzed)");
+        assert_eq!(unanalyzed_note(3, None), "3 comments (not analyzed)");
+        assert_eq!(
+            unanalyzed_note(3, Some("ali")),
+            "3 comments, last from @ali (not analyzed)"
+        );
+    }
+
+    // The defect this whole change exists to fix: when the model could not be
+    // asked, an issue with discussion on it used to vanish from the digest
+    // entirely. The workload line and the PR rows never needed a model at all.
+    #[test]
+    fn digest_is_complete_without_any_model_verdicts() {
+        let mut issue = item("me/app", 7, 3);
+        issue.action_note = Some(unanalyzed_note(3, Some("ali")));
+        let report = GithubReport {
+            issues: vec![issue],
+            pull_requests: vec![item("me/app", 9, 0)],
+        };
+
+        let digest = build_final_digest(&report, 30);
+
+        assert!(digest.contains("Workload: 1 issues, 1 pull requests open."));
+        assert!(digest.contains("me/app #7 — 3 comments, last from @ali (not analyzed)"));
+        // Every PR is always worth a line, whatever its review state.
+        assert!(digest.contains("me/app #9 — still waiting on a review/approval"));
+        assert!(!digest.contains("nothing urgent"));
+    }
+
+    #[test]
+    fn an_issue_the_model_cleared_stays_out_of_the_attention_list() {
+        let report = GithubReport {
+            issues: vec![item("me/app", 7, 3)], // action_note: None == NO_ACTION
+            pull_requests: vec![],
+        };
+        let digest = build_final_digest(&report, 30);
+        assert!(digest.contains("Attention: nothing urgent."));
+        assert!(!digest.contains("#7"));
+    }
+
+    #[test]
+    fn stale_items_collapse_into_one_line() {
+        let mut old_issue = item("me/app", 1, 0);
+        old_issue.updated_at = "2020-01-01T00:00:00Z".to_string();
+        let mut old_pr = item("me/app", 2, 0);
+        old_pr.updated_at = "2020-01-01T00:00:00Z".to_string();
+
+        let report = GithubReport {
+            issues: vec![old_issue],
+            pull_requests: vec![old_pr],
+        };
+        let digest = build_final_digest(&report, 30);
+
+        assert!(digest.contains("2 item(s) stale (30+ days, no update): me/app #1, me/app #2"));
+    }
+
+    #[test]
+    fn a_requested_change_is_quoted_so_the_reason_survives() {
+        let mut pr = item("me/app", 4, 0);
+        pr.review_state = Some("CHANGES_REQUESTED".to_string());
+        pr.review_body = Some("please rename the flag".to_string());
+
+        let report = GithubReport {
+            issues: vec![],
+            pull_requests: vec![pr],
+        };
+        let digest = build_final_digest(&report, 30);
+
+        assert!(digest.contains("changes requested — \"please rename the flag\""));
+    }
 }

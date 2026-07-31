@@ -32,16 +32,100 @@ async function startServerNow(statusEl, baseUrl, startCommand) {
   }
 }
 
+// Which section was open last time. Remembered because this window is opened
+// to finish one job — you come back to Advanced three times in a row, not to a
+// different tab each time.
+const LAST_SECTION_KEY = "settings.section";
+
 function setupNav() {
-  const items = document.querySelectorAll(".hub-nav-item");
-  items.forEach((item) => {
-    item.addEventListener("click", () => {
-      items.forEach((i) => i.classList.remove("active"));
-      item.classList.add("active");
-      document.querySelectorAll(".hub-section").forEach((s) => s.classList.remove("active"));
-      el(`section-${item.dataset.section}`).classList.add("active");
+  const items = [...document.querySelectorAll(".hub-nav-item")];
+
+  function show(item) {
+    items.forEach((i) => {
+      const on = i === item;
+      i.classList.toggle("active", on);
+      i.setAttribute("aria-selected", String(on));
+    });
+    document.querySelectorAll(".hub-section").forEach((s) => s.classList.remove("active"));
+    el(`section-${item.dataset.section}`).classList.add("active");
+    el("titlebar-crumb").textContent = item.querySelector("span")?.textContent || "";
+    // Sections don't share a scroll position — arriving halfway down a form you
+    // have never opened reads as a rendering fault.
+    document.querySelector(".hub-content").scrollTop = 0;
+    try {
+      localStorage.setItem(LAST_SECTION_KEY, item.dataset.section);
+    } catch {
+      // Private-mode or storage-disabled webview: not remembering which tab was
+      // open is not worth failing the click over.
+    }
+  }
+
+  items.forEach((item, index) => {
+    item.addEventListener("click", () => show(item));
+    // Arrow keys walk the rail, as a tablist is expected to: Tab alone would
+    // have to step through all eight buttons to reach the form.
+    item.addEventListener("keydown", (e) => {
+      const step = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;
+      if (!step) return;
+      e.preventDefault();
+      const next = items[(index + step + items.length) % items.length];
+      next.focus();
+      show(next);
     });
   });
+
+  let restored = null;
+  try {
+    restored = items.find((i) => i.dataset.section === localStorage.getItem(LAST_SECTION_KEY));
+  } catch {
+    restored = null;
+  }
+  show(restored || items[0]);
+}
+
+// A show/hide button inside every password box. Added here rather than in the
+// markup because it is the same three lines five times over, and because a
+// secret that can't be read back is a secret that gets re-pasted wrongly.
+const EYE = `<svg viewBox="0 0 24 24"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>`;
+const EYE_OFF = `<svg viewBox="0 0 24 24"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/><path d="M3 3l18 18"/></svg>`;
+
+function setupRevealButtons() {
+  document.querySelectorAll(".input-wrap input[type='password']").forEach((input) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "input-reveal";
+    btn.innerHTML = EYE;
+    btn.title = "Show";
+    btn.setAttribute("aria-label", "Show the value");
+    btn.addEventListener("click", () => {
+      const shown = input.type === "text";
+      input.type = shown ? "password" : "text";
+      btn.innerHTML = shown ? EYE : EYE_OFF;
+      btn.title = shown ? "Show" : "Hide";
+      btn.setAttribute("aria-label", shown ? "Show the value" : "Hide the value");
+    });
+    input.after(btn);
+  });
+}
+
+// Ctrl+S saves whichever section is open. Every section's primary button is
+// already one click away, but a settings form is a form, and Ctrl+S is what
+// hands reach for in one.
+const SECTION_SAVE_BUTTONS = {
+  llm: "llmSaveBtn",
+  stt: "sttSaveBtn",
+  tts: "ttsSaveBtn",
+  github: "githubSaveBtn",
+  google: "googleSaveBtn",
+  images: "imageSaveBtn",
+  memory: "memorySaveBtn",
+  advanced: "advancedSaveBtn",
+};
+
+function saveActiveSection() {
+  const active = document.querySelector(".hub-nav-item.active");
+  const button = el(SECTION_SAVE_BUTTONS[active?.dataset.section] || "");
+  if (button && !button.disabled) button.click();
 }
 
 // ---------- LLM section ----------
@@ -269,6 +353,142 @@ async function saveGithubConfig() {
     refreshReport();
   } catch (err) {
     setStatus(el("githubStatus"), "error", String(err));
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// ---------- Google (Gmail + Calendar) section ----------
+// One OAuth client, any number of accounts — mirrors the LLM section's profile
+// list, since "several of a thing" is the same UI problem twice.
+
+// What was on screen when the section last loaded, so saving can tell an edit
+// from a re-save. Saving a client that really changed disconnects every account
+// — the refresh tokens belong to the old client — and that must not happen just
+// because the form was submitted again.
+let loadedGoogleClient = { client_id: "", client_secret: "" };
+
+// Both halves round-trip into their boxes, like every other credential in this
+// window. The secret was withheld once and the blank box it left behind is what
+// made people retype it — see get_google_client.
+async function loadGoogleConfig() {
+  const client = await invoke("get_google_client");
+  loadedGoogleClient = client;
+  el("googleClientId").value = client.client_id;
+  el("googleClientSecret").value = client.client_secret;
+  await refreshGoogleAccounts();
+}
+
+function renderGoogleAccounts(status) {
+  const container = el("googleAccountList");
+  container.innerHTML = "";
+
+  if (!status.client_configured) {
+    const empty = document.createElement("div");
+    empty.className = "llm-profile-empty";
+    empty.textContent = "Save your client ID and secret first.";
+    container.appendChild(empty);
+    return;
+  }
+  if (status.accounts.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "llm-profile-empty";
+    empty.textContent = "No accounts connected yet.";
+    container.appendChild(empty);
+    return;
+  }
+
+  for (const account of status.accounts) {
+    const row = document.createElement("div");
+    row.className = "llm-profile-row";
+
+    const label = document.createElement("span");
+    label.className = "llm-profile-row-label";
+    label.textContent = account.email || "(unknown address)";
+
+    const del = document.createElement("button");
+    del.className = "llm-profile-row-del";
+    del.textContent = "×";
+    del.title = "Remove this account";
+    del.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      await invoke("google_remove_account", { accountId: account.id });
+      // Worded as local-only: this forgets the grant here, it cannot revoke it
+      // at Google's end — that is done from the account's own security page.
+      setStatus(el("googleStatus"), "", `Removed ${account.email} on this machine.`);
+      await refreshGoogleAccounts();
+    });
+
+    row.appendChild(label);
+    row.appendChild(del);
+    container.appendChild(row);
+  }
+}
+
+async function refreshGoogleAccounts() {
+  const status = await invoke("google_status");
+  renderGoogleAccounts(status);
+  return status;
+}
+
+async function saveGoogleClient() {
+  const client_id = el("googleClientId").value.trim();
+  const client_secret = el("googleClientSecret").value.trim();
+  // Blank is only an error the first time. After that it means "keep the stored
+  // one" (see save_google_client), so clearing the box cannot wipe the secret.
+  if (!client_id || (!client_secret && !loadedGoogleClient.client_secret)) {
+    setStatus(el("googleStatus"), "error", "Both the client ID and the secret are required.");
+    return;
+  }
+
+  // Asked out loud, because it cannot be undone from here: a refresh token is
+  // issued to one client, so a genuinely different client makes every connected
+  // account useless and the backend drops them. Re-saving the same values is not
+  // a change and is not asked about.
+  const changed =
+    client_id !== loadedGoogleClient.client_id ||
+    (client_secret && client_secret !== loadedGoogleClient.client_secret);
+  const connected = (await refreshGoogleAccounts()).accounts.length;
+  if (changed && connected > 0) {
+    const ok = window.confirm(
+      `Changing the client disconnects ${connected} connected account` +
+        `${connected === 1 ? "" : "s"} — their sign-ins belong to the old client ` +
+        `and stop working. You will have to add them again.\n\nChange it anyway?`
+    );
+    if (!ok) {
+      setStatus(el("googleStatus"), "", "");
+      return;
+    }
+  }
+  const btn = el("googleSaveBtn");
+  btn.disabled = true;
+  try {
+    await invoke("save_google_client", { clientId: client_id, clientSecret: client_secret });
+    // Changing either half invalidates every connected account (the backend
+    // clears them), so say so rather than leaving a stale list on screen.
+    setStatus(el("googleStatus"), "ok", "Saved. Now add an account.");
+    // Re-reads the stored state so the box goes back to saying "saved" rather
+    // than sitting there with the secret still legible on screen.
+    await loadGoogleConfig();
+  } catch (err) {
+    setStatus(el("googleStatus"), "error", String(err));
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function addGoogleAccount() {
+  const btn = el("googleAddAccountBtn");
+  btn.disabled = true;
+  // This opens a browser and waits for a human, so the pending message has to
+  // say where to look — otherwise the window just appears to hang.
+  setStatus(el("googleStatus"), "pending", "Finish signing in in your browser…");
+  try {
+    const account = await invoke("google_add_account");
+    setStatus(el("googleStatus"), "ok", `Connected ${account.email || "the account"}.`);
+    await refreshGoogleAccounts();
+  } catch (err) {
+    setStatus(el("googleStatus"), "error", String(err));
   } finally {
     btn.disabled = false;
   }
@@ -741,10 +961,15 @@ function buildTunableRow(setting, value) {
   return row;
 }
 
-// The Memory group has its own section in the sidebar, because it is a feature
-// rather than a pile of numbers — so Advanced leaves it out instead of showing
-// every field twice.
-const MEMORY_GROUP = "Memory";
+// Groups that have a section of their own in the sidebar, because each is a
+// feature rather than a pile of numbers — so Advanced leaves them out instead of
+// showing every field twice. The heading is dropped in their own section too:
+// the section is already named after them.
+//
+// Images is here for the same reason Memory is, and because it was the group
+// people could not find: a local server you have to install and point at, filed
+// under the tab you visit to adjust something that already works.
+const OWN_SECTION_GROUPS = { Memory: "memoryTunables", Images: "imageTunables" };
 
 async function loadTunableSettings() {
   const payload = await invoke("get_tunables");
@@ -752,16 +977,18 @@ async function loadTunableSettings() {
   tunableDefaults = Object.fromEntries(payload.settings.map((s) => [s.id, s.default]));
 
   const advanced = el("tunableGroups");
-  const memory = el("memoryTunables");
   advanced.innerHTML = "";
-  memory.innerHTML = "";
+  for (const containerId of Object.values(OWN_SECTION_GROUPS)) {
+    el(containerId).innerHTML = "";
+  }
 
   // Grouped in the order the backend declares, so related settings stay together
   // and the form's shape is decided next to the values rather than here.
   for (const group of payload.groups) {
+    const ownSection = OWN_SECTION_GROUPS[group];
     const block = document.createElement("div");
     block.className = "tunable-group";
-    if (group !== MEMORY_GROUP) {
+    if (!ownSection) {
       const heading = document.createElement("h4");
       heading.textContent = group;
       block.appendChild(heading);
@@ -769,7 +996,7 @@ async function loadTunableSettings() {
     for (const setting of payload.settings.filter((s) => s.group === group)) {
       block.appendChild(buildTunableRow(setting, payload.values[setting.id]));
     }
-    (group === MEMORY_GROUP ? memory : advanced).appendChild(block);
+    (ownSection ? el(ownSection) : advanced).appendChild(block);
   }
 }
 
@@ -939,6 +1166,7 @@ async function resetAllTunables() {
 
 window.addEventListener("DOMContentLoaded", async () => {
   setupNav();
+  setupRevealButtons();
 
   loadLlmConfig();
   sttSection.load();
@@ -950,6 +1178,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     .catch((err) => setStatus(el("advancedStatus"), "error", String(err)));
   const token = await loadGithubConfig();
   if (token) refreshReport();
+  loadGoogleConfig();
 
   el("llmTestBtn").addEventListener("click", testLlmConnection);
   el("llmSaveBtn").addEventListener("click", saveProfile);
@@ -970,6 +1199,12 @@ window.addEventListener("DOMContentLoaded", async () => {
   el("think").addEventListener("change", () => clearStatus(el("llmStatus")));
   el("llmStartNowBtn").addEventListener("click", () => {
     startServerNow(el("llmStatus"), el("baseUrl").value.trim(), el("startCommand").value.trim());
+  });
+
+  el("googleSaveBtn").addEventListener("click", saveGoogleClient);
+  el("googleAddAccountBtn").addEventListener("click", addGoogleAccount);
+  ["googleClientId", "googleClientSecret"].forEach((id) => {
+    el(id).addEventListener("input", () => clearStatus(el("googleStatus")));
   });
 
   el("githubTestBtn").addEventListener("click", testGithubConnection);
@@ -995,6 +1230,22 @@ window.addEventListener("DOMContentLoaded", async () => {
   el("advancedSaveBtn").addEventListener("click", () => saveTunableSettings(el("advancedStatus")));
   el("advancedResetBtn").addEventListener("click", resetAllTunables);
   el("memorySaveBtn").addEventListener("click", () => saveTunableSettings(el("memorySettingsStatus")));
+  el("imageSaveBtn").addEventListener("click", () => saveTunableSettings(el("imageSettingsStatus")));
+  // Saves first, so pressing Start now after editing the command starts the one
+  // on screen rather than the one from before the edit.
+  el("imageStartNowBtn").addEventListener("click", async () => {
+    const button = el("imageStartNowBtn");
+    button.disabled = true;
+    try {
+      await saveTunableSettings(el("imageSettingsStatus"));
+      const message = await invoke("start_image_server_now");
+      setStatus(el("imageStatus"), "ok", message);
+    } catch (err) {
+      setStatus(el("imageStatus"), "error", String(err));
+    } finally {
+      button.disabled = false;
+    }
+  });
   el("memoryReindexBtn").addEventListener("click", rebuildRecallIndex);
   el("chatsDirChangeBtn").addEventListener("click", () => changeChatsDir("choose_chats_dir"));
   el("chatsDirResetBtn").addEventListener("click", () => changeChatsDir("reset_chats_dir"));
@@ -1005,5 +1256,9 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") invoke("hide_settings");
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+      e.preventDefault();
+      saveActiveSection();
+    }
   });
 });

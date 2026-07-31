@@ -419,25 +419,6 @@ pub fn system_mic_set_muted(muted: bool) -> Result<(), String> {
     with_default_endpoint_volume(eCapture, |v| unsafe { v.SetMute(muted, std::ptr::null()) })
 }
 
-// Temporary risk-spike probe (see plan doc) — wired to a tray menu item so
-// it can be triggered manually with a real Spotify session playing, before
-// building the rest of the feature on top of an unverified API surface.
-pub fn probe_spotify(app: tauri::AppHandle) {
-    std::thread::spawn(move || {
-        unsafe {
-            let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
-        }
-        match get_now_playing_inner() {
-            Ok(Some(np)) => append_debug_log(
-                &app,
-                &format!("probe: OK — title={:?} artist={:?} is_playing={}", np.title, np.artist, np.is_playing),
-            ),
-            Ok(None) => append_debug_log(&app, "probe: OK — no Spotify session found (is Spotify open and playing?)"),
-            Err(e) => append_debug_log(&app, &format!("probe: FAILED — {e}")),
-        }
-    });
-}
-
 pub fn start_spotify_watcher(app: tauri::AppHandle) {
     std::thread::spawn(move || {
         unsafe {

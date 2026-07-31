@@ -8,10 +8,19 @@
 // "Draw me a fox" needs no interpretation, so the request goes straight to the
 // server and the answer comes straight back.
 //
-// The server is stable-diffusion.cpp's sd-server, which speaks the OpenAI
-// images shape — the same dialect ai/llm.rs already talks. That is what makes
-// the model behind it a setting rather than a code change: SD 1.5, SDXL and
-// Flux are all the same request, differing only in how big and how slow.
+// The server is stable-diffusion.cpp's sd-server. It has two APIs and this tries
+// its own one first, falling back to the OpenAI images shape that ai/llm.rs also
+// talks — the same probe-then-fall-back arrangement, for the same reason.
+//
+// The fallback is genuinely a fallback and not an equal: measured against
+// sd-server, the OpenAI-compatible endpoint silently ignores `seed`, `steps` and
+// `width`/`height`, reading only `prompt`, `size` and `negative_prompt`. Drawing
+// through it meant every request for the same prompt returned the same bytes
+// forever, and two settings the user could change did nothing at all.
+//
+// Either way the model behind it stays a setting rather than a code change: SD
+// 1.5, SDXL and Flux are all the same request, differing only in how big and how
+// slow.
 
 use std::path::PathBuf;
 
@@ -19,7 +28,7 @@ use base64::Engine;
 use serde::Serialize;
 use tauri::Manager;
 
-use crate::ai::process::{autostart_if_needed, stop_tracked};
+use crate::ai::process::{autostart_if_needed, stop_local_server};
 
 /// A server that has to load several GB before it answers the first request,
 /// then denoise for as long as the resolution demands. Measured on this
@@ -27,7 +36,10 @@ use crate::ai::process::{autostart_if_needed, stop_tracked};
 /// but a cold start adds the model load, and a bigger model adds a lot of it.
 const GENERATE_TIMEOUT_SECS: u64 = 600;
 
-static IMAGE_CHILD_PID: std::sync::Mutex<Option<u32>> = std::sync::Mutex::new(None);
+/// How often to ask whether an accepted job has finished. Short enough that a
+/// two-second picture is not reported a second late, long enough that a
+/// ten-minute one does not cost hundreds of requests.
+const POLL_INTERVAL_MS: u64 = 250;
 
 #[derive(Serialize)]
 pub struct GeneratedImage {
@@ -40,6 +52,11 @@ pub struct GeneratedImage {
     pub data_url: String,
     pub width: u32,
     pub height: u32,
+    /// What the picture was drawn from, when the server was one that takes a
+    /// seed. Shown under the image because it is the only way back to a result
+    /// you liked: the same seed and the same prompt reproduce it exactly, and
+    /// without it a good picture is gone the moment you draw another.
+    pub seed: Option<i64>,
     pub seconds: f32,
 }
 
@@ -112,44 +129,21 @@ pub async fn generate_image(
         let height = height.unwrap_or(size);
         let steps = crate::tunables::int(&app, crate::tunables::IMAGE_STEPS);
         let negative = crate::tunables::text(&app, crate::tunables::IMAGE_NEGATIVE_PROMPT);
-
-        let mut payload = serde_json::json!({
-            "prompt": prompt,
-            "size": format!("{width}x{height}"),
-            "n": 1,
-            "steps": steps,
-        });
-        if !negative.trim().is_empty() {
-            payload["negative_prompt"] = serde_json::json!(negative.trim());
-        }
+        let pinned = crate::tunables::int(&app, crate::tunables::IMAGE_SEED);
+        let seed = if pinned < 0 { random_seed() } else { pinned };
 
         let started = std::time::Instant::now();
-        let response = reqwest::blocking::Client::new()
-            .post(format!("{base_url}/v1/images/generations"))
-            .timeout(std::time::Duration::from_secs(GENERATE_TIMEOUT_SECS))
-            .json(&payload)
-            .send()
-            .map_err(|e| {
-                format!(
-                    "Couldn't reach the image server at {base_url}: {e}\n\
-                     Start it from Settings, or check the address."
-                )
-            })?;
-        if !response.status().is_success() {
-            let status = response.status();
-            let detail = response.text().unwrap_or_default();
-            return Err(format!("The image server answered {status}: {}", detail.trim()));
-        }
-
-        let body: serde_json::Value = response
-            .json()
-            .map_err(|e| format!("The image server sent something unreadable: {e}"))?;
-        let encoded = body["data"][0]["b64_json"]
-            .as_str()
-            .ok_or_else(|| format!("No image in the server's reply: {body}"))?;
-        let bytes = base64::engine::general_purpose::STANDARD
-            .decode(encoded)
-            .map_err(|e| format!("The image came back damaged: {e}"))?;
+        let (bytes, seed) = match sdcpp_generate(
+            base_url, &prompt, negative.trim(), width, height, steps, seed,
+        ) {
+            Some(result) => (result?, Some(seed)),
+            // Not a stable-diffusion.cpp server. The generic endpoint still
+            // draws, it just cannot be told a seed or a step count.
+            None => (
+                openai_generate(base_url, &prompt, negative.trim(), width, height)?,
+                None,
+            ),
+        };
 
         let path = images_dir(&app).join(file_name(&prompt));
         std::fs::write(&path, &bytes)
@@ -163,8 +157,206 @@ pub async fn generate_image(
             ),
             width,
             height,
+            seed,
             seconds: started.elapsed().as_secs_f32(),
         })
+    })
+    .await
+}
+
+/// A fresh seed for each picture.
+///
+/// Rolled here rather than by asking the server for a random one, because the
+/// obvious way to do that does not work: sd-server documents -1 as "random" and
+/// its own web UI defaults to it, but measured against this build, two requests
+/// with `seed: -1` came back byte-identical. Left to the server, every drawing of
+/// the same prompt is the same picture forever — which is exactly the symptom
+/// this replaced.
+///
+/// Uuid rather than a new rand dependency: v4 is already used elsewhere in this
+/// crate and is CSPRNG-backed, and four of its bytes are as good a seed as any.
+fn random_seed() -> i64 {
+    let bytes = uuid::Uuid::new_v4();
+    let bytes = bytes.as_bytes();
+    i64::from(u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
+}
+
+/// stable-diffusion.cpp's own endpoint, which is the only one that takes a seed.
+///
+/// `None` means "this server does not have this endpoint" and the caller should
+/// fall back — the same probe-then-fall-back shape as llm.rs's Ollama-native
+/// path, and for the same reason: the richer API is worth using when it is there,
+/// and its absence must not be an error.
+///
+/// Measured against sd-server, which is what made this necessary. On the
+/// OpenAI-compatible endpoint below: `seed` is ignored, `width`/`height` are
+/// ignored (only `size` is read), and `steps` is ignored — 6 steps and 30 steps
+/// returned the same bytes in the same time. Here, all three take effect, and the
+/// same seed twice reproduces the picture exactly.
+fn sdcpp_generate(
+    base_url: &str,
+    prompt: &str,
+    negative: &str,
+    width: u32,
+    height: u32,
+    steps: i64,
+    seed: i64,
+) -> Option<Result<Vec<u8>, String>> {
+    let mut payload = serde_json::json!({
+        "prompt": prompt,
+        "width": width,
+        "height": height,
+        "seed": seed,
+        "sample_params": { "sample_steps": steps },
+    });
+    if !negative.is_empty() {
+        payload["negative_prompt"] = serde_json::json!(negative);
+    }
+
+    let client = reqwest::blocking::Client::new();
+    let response = client
+        .post(format!("{base_url}/sdcpp/v1/img_gen"))
+        .timeout(std::time::Duration::from_secs(30))
+        .json(&payload)
+        .send()
+        .ok()?;
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return None;
+    }
+    Some(sdcpp_await_job(&client, base_url, response))
+}
+
+/// Waits out an accepted job.
+///
+/// This endpoint is asynchronous where the OpenAI-compatible one is not: it
+/// answers 202 with a job id and a URL to poll. Polling rather than a long-held
+/// request is the server's design, not a choice available here.
+fn sdcpp_await_job(
+    client: &reqwest::blocking::Client,
+    base_url: &str,
+    response: reqwest::blocking::Response,
+) -> Result<Vec<u8>, String> {
+    if !response.status().is_success() {
+        let status = response.status();
+        let detail = response.text().unwrap_or_default();
+        return Err(format!("The image server answered {status}: {}", detail.trim()));
+    }
+    let job: serde_json::Value = response
+        .json()
+        .map_err(|e| format!("The image server sent something unreadable: {e}"))?;
+    let poll_url = job["poll_url"]
+        .as_str()
+        .ok_or("The image server accepted the job but did not say where to collect it")?;
+    let poll_url = format!("{base_url}{poll_url}");
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(GENERATE_TIMEOUT_SECS);
+    loop {
+        if std::time::Instant::now() > deadline {
+            return Err("The image server is still working after ten minutes — giving up.".into());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(POLL_INTERVAL_MS));
+        let status: serde_json::Value = client
+            .get(&poll_url)
+            .timeout(std::time::Duration::from_secs(30))
+            .send()
+            .map_err(|e| format!("Lost contact with the image server: {e}"))?
+            .json()
+            .map_err(|e| format!("The image server sent something unreadable: {e}"))?;
+
+        match status["status"].as_str().unwrap_or_default() {
+            "completed" | "succeeded" => {
+                let encoded = status["result"]["images"][0]["b64_json"]
+                    .as_str()
+                    .ok_or("The image server finished but sent no picture")?;
+                return base64::engine::general_purpose::STANDARD
+                    .decode(encoded)
+                    .map_err(|e| format!("The image came back damaged: {e}"));
+            }
+            "failed" => {
+                let why = status["error"].as_str().unwrap_or("no reason given");
+                return Err(format!("The image server could not draw it: {why}"));
+            }
+            // queued / running: keep waiting.
+            _ => {}
+        }
+    }
+}
+
+/// The generic endpoint, for any local server that is not stable-diffusion.cpp.
+///
+/// Only `prompt`, `size` and `negative_prompt` are sent, because those are the
+/// only fields this endpoint was measured to read.
+fn openai_generate(
+    base_url: &str,
+    prompt: &str,
+    negative: &str,
+    width: u32,
+    height: u32,
+) -> Result<Vec<u8>, String> {
+    let mut payload = serde_json::json!({
+        "prompt": prompt,
+        "size": format!("{width}x{height}"),
+        "n": 1,
+    });
+    if !negative.is_empty() {
+        payload["negative_prompt"] = serde_json::json!(negative);
+    }
+
+    let response = reqwest::blocking::Client::new()
+        .post(format!("{base_url}/v1/images/generations"))
+        .timeout(std::time::Duration::from_secs(GENERATE_TIMEOUT_SECS))
+        .json(&payload)
+        .send()
+        .map_err(|e| {
+            format!(
+                "Couldn't reach the image server at {base_url}: {e}\n\
+                 Start it from Settings, or check the address."
+            )
+        })?;
+    if !response.status().is_success() {
+        let status = response.status();
+        let detail = response.text().unwrap_or_default();
+        return Err(format!("The image server answered {status}: {}", detail.trim()));
+    }
+
+    let body: serde_json::Value = response
+        .json()
+        .map_err(|e| format!("The image server sent something unreadable: {e}"))?;
+    let encoded = body["data"][0]["b64_json"]
+        .as_str()
+        .ok_or_else(|| format!("No image in the server's reply: {body}"))?;
+    base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .map_err(|e| format!("The image came back damaged: {e}"))
+}
+
+/// Writes an image the user attached to a message into the pictures folder, and
+/// answers where it went.
+///
+/// Attachments used to be the one kind of image with nowhere to live: a chat
+/// stores no bytes, so a pasted screenshot existed only until the message was
+/// sent and its card was then a label with nothing behind it. Kept beside the
+/// generated pictures rather than somewhere of its own — both are "an image this
+/// conversation refers to", and read_generated_image and open_generated_image
+/// already confine themselves to that folder.
+#[tauri::command]
+pub async fn save_attached_image(
+    app: tauri::AppHandle,
+    name: String,
+    data: String,
+) -> Result<String, String> {
+    crate::offload(move || {
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(data.trim())
+            .map_err(|e| format!("That image could not be read: {e}"))?;
+        // Named from the attachment but through the same slug-and-timestamp rule
+        // as a generated one, so two screenshots pasted a minute apart cannot
+        // land on the same file, whatever the browser called them.
+        let stem = name.rsplit_once('.').map(|(s, _)| s).unwrap_or(&name);
+        let path = images_dir(&app).join(file_name(stem));
+        std::fs::write(&path, &bytes)
+            .map_err(|e| format!("Couldn't save the image to {}: {e}", path.display()))?;
+        Ok(path.to_string_lossy().to_string())
     })
     .await
 }
@@ -213,13 +405,40 @@ pub fn open_generated_image(app: tauri::AppHandle, path: String) -> Result<(), S
 pub fn maybe_autostart(app: &tauri::AppHandle) {
     let command = crate::tunables::text(app, crate::tunables::IMAGE_START_COMMAND);
     let base_url = crate::tunables::text(app, crate::tunables::IMAGE_BASE_URL);
-    autostart_if_needed(base_url.trim(), command.trim(), &IMAGE_CHILD_PID);
+    autostart_if_needed(base_url.trim(), command.trim());
 }
 
-/// Only ever kills a process this widget started itself — see the same note on
-/// llm.rs's stop_autostarted.
-pub fn stop_autostarted() {
-    stop_tracked(&IMAGE_CHILD_PID);
+/// Stops the local picture server for the tray's stop-and-quit, whoever started
+/// it — see process::stop_local_server.
+pub fn stop_server(app: &tauri::AppHandle) {
+    stop_local_server(crate::tunables::text(app, crate::tunables::IMAGE_BASE_URL).trim());
+}
+
+/// The Images section's "Start now" button.
+///
+/// Takes no arguments, unlike llm.rs's start_server_now which is handed a URL and
+/// a command by whichever of the LLM/STT/TTS forms called it. Those three keep
+/// their settings in AppConfig, where the form owns them; this server's live in
+/// the tunables registry, and having the settings window read them out of its own
+/// inputs to hand straight back would put a second copy of them in the frontend —
+/// which is the thing tunables.rs exists to prevent.
+#[tauri::command]
+pub async fn start_image_server_now(app: tauri::AppHandle) -> Result<String, String> {
+    crate::offload(move || {
+        let base_url = crate::tunables::text(&app, crate::tunables::IMAGE_BASE_URL);
+        let command = crate::tunables::text(&app, crate::tunables::IMAGE_START_COMMAND);
+        if command.trim().is_empty() {
+            return Err("No start command configured.".to_string());
+        }
+        if crate::ai::process::is_reachable(base_url.trim()) {
+            return Ok("Already running.".to_string());
+        }
+        match crate::ai::process::spawn_detached(command.trim()) {
+            Some(_) => Ok("Starting… a big model takes a few seconds to load.".to_string()),
+            None => Err("Couldn't launch that command — check it's a valid path.".to_string()),
+        }
+    })
+    .await
 }
 
 #[cfg(test)]

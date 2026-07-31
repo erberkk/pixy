@@ -56,6 +56,22 @@ pub struct TtsProfile {
     pub voice: String,
 }
 
+/// One connected Google account (see google/oauth.rs).
+///
+/// The refresh token is the whole grant; access tokens are derived from it at
+/// runtime and never stored, since one lives an hour and a persisted copy would
+/// be stale far more often than useful.
+#[derive(Serialize, Deserialize, Clone, Default)]
+pub struct GoogleAccount {
+    /// Stable local id, so a renamed or re-consented account keeps its caches.
+    pub id: String,
+    /// What the account calls itself. Shown in Settings so "connected" does not
+    /// have to be taken on faith, and shown on notices once a second account
+    /// exists — "Ayşe replied" is ambiguous across two mailboxes.
+    pub email: String,
+    pub refresh_token: String,
+}
+
 #[derive(Serialize, Deserialize, Clone, Default)]
 pub struct AppConfig {
     pub notes_dir: Option<String>,
@@ -146,6 +162,33 @@ pub struct AppConfig {
     // per day around the scheduled morning time.
     #[serde(default)]
     pub last_digest_date: Option<String>,
+
+    // Google OAuth, for Gmail and Calendar (see google/oauth.rs).
+    //
+    // The client id and secret are the user's own, created once in their Google
+    // Cloud console — deliberately not compiled in. Partly because a desktop
+    // binary cannot keep a secret (Google's installed-app flow says as much, and
+    // is why it also uses PKCE), and partly because a shipped-in client would
+    // put every user of this widget under one OAuth app's quota and consent
+    // screen. Yours stays yours.
+    //
+    // ONE client, ANY number of accounts: an OAuth client is the application's
+    // identity, not the user's, so the same pair below authorizes a personal and
+    // a work mailbox alike. Adding a second account costs nothing in the Cloud
+    // console — only another trip through the consent screen.
+    #[serde(default)]
+    pub google_client_id: Option<String>,
+    #[serde(default)]
+    pub google_client_secret: Option<String>,
+    // Every connected mailbox, in the order they were added. Same multi-entry
+    // shape as llm_profiles above, for the same reason: one is a special case of
+    // several, and the special case is not worth its own code path.
+    #[serde(default)]
+    pub google_accounts: Vec<GoogleAccount>,
+    // The morning brief's counterpart to last_digest_date. Separate because the
+    // two cards are scheduled independently and either can be turned off.
+    #[serde(default)]
+    pub last_brief_date: Option<String>,
     // Extra roots to scan for memory files (content/memory.rs), on top of the
     // default ~/.claude/projects — lets a user whose Claude Code config
     // lives somewhere else (CLAUDE_CONFIG_DIR set, a different OS user

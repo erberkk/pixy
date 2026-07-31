@@ -75,6 +75,22 @@ const STOPWORDS: &[&str] = &[
     "me", "my", "us", "our", "your", "remind", "remember", "recall", "again",
     "bana", "bize", "bizim", "benim", "senin", "hatirla", "hatirlat", "hatirliyor",
     "yine", "tekrar",
+    // Words that point at what is in front of you rather than naming a subject.
+    // "what do you see in here", asked about an attached screenshot, survived
+    // stopword removal as ["see", "here"] — and since coverage is a SHARE of the
+    // question's content words, any old note containing both scored a perfect
+    // 1.0 and was recalled as relevant. A coverage floor cannot catch this on its
+    // own: it measures how much of the question was matched, not whether the
+    // question asked anything specific enough to match.
+    //
+    // The list is the right mechanism for that rather than corpus statistics.
+    // Rarity would say the same thing, but it needs a corpus big enough to
+    // measure against, and on a handful of conversations "appears in a third of
+    // everything" describes perfectly good search terms too.
+    "see", "seeing", "here", "there", "look", "looks", "looking", "show", "shows",
+    "tell", "say", "says", "mean", "means", "think", "get", "got", "make",
+    "gor", "goruyor", "gorunuyor", "bak", "bakar", "burada", "burda", "sura",
+    "surada", "soyle", "anlat", "yap", "var", "yok",
     "ve", "veya", "ama", "ile", "icin", "bir", "bu", "su", "o", "ne", "nasil", "neden", "ni̇ye",
     "mi", "mu", "ya", "de", "da", "ki", "biz", "ben", "sen", "yaptik", "yapti",
     // Greetings and pleasantries — see the note above.
@@ -1891,6 +1907,7 @@ mod tests {
             attachments: Vec::new(),
             image_path: String::new(),
             image_meta: String::new(),
+            sources: Vec::new(),
         }
     }
 
@@ -2718,6 +2735,7 @@ mod tests {
             text: "the file's own contents, which are NOT indexed".to_string(),
             kind: "text".to_string(),
             full_chars: 0,
+            path: String::new(),
         });
         m
     }
