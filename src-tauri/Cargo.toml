@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "An always-on-top desktop mascot bridging Claude Code hooks, a local LLM, voice, mail and GitHub"
 authors = ["Erberk Akbulut"]
 license = "MIT"
-repository = "https://github.com/erberkakbulut/pixy"
+repository = "https://github.com/erberkk/pixy"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
