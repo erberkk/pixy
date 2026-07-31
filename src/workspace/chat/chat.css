@@ -1149,3 +1149,60 @@
 .chat-generated-open:hover {
   color: var(--accent);
 }
+
+/* Icons rather than the words Copy/Retry/Edit. Three words on every message is
+   more furniture than content at a glance; the tooltip and aria-label carry the
+   meaning for anyone who needs it spelled out. */
+.chat-msg-actions button svg {
+  width: 14px;
+  height: 14px;
+  display: block;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.chat-msg-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+}
+
+/* Shown only while an earlier message is being amended. It says what sending
+   will cost, because that cost is the whole reason Edit needed a way out. */
+.chat-edit-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  /* Matches the composer's own 22px side padding so the two read as one block. */
+  margin: 0 22px -4px;
+  padding: 7px 10px;
+  border-radius: 9px;
+  background: rgba(232, 176, 75, 0.1);
+  border: 1px solid rgba(232, 176, 75, 0.32);
+  color: #e8b04b;
+  font-size: 11.5px;
+  line-height: 1.35;
+}
+
+.chat-edit-banner span {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.chat-edit-cancel {
+  flex: 0 0 auto;
+  background: transparent;
+  border: 1px solid rgba(232, 176, 75, 0.45);
+  color: #e8b04b;
+  border-radius: 999px;
+  padding: 3px 11px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.chat-edit-cancel:hover {
+  background: rgba(232, 176, 75, 0.18);
+  color: #f3c877;
+}

@@ -565,13 +565,13 @@ function messageHtml(m, index) {
     '<div class="chat-msg-actions">' +
     '<button class="chat-msg-copy" type="button" data-index="' +
     index +
-    '" title="Copy this message">Copy</button>' +
+    '" title="Copy this message" aria-label="Copy">' + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M15 5H6a2 2 0 00-2 2v9"/></svg>' + "</button>" +
     // Only on the last answer. Retrying an earlier one would have to throw away
     // every turn after it, which is a different and much more destructive action
     // than the word suggests.
     (m.role === "assistant" && index === activeChatMessages.length - 1
       ? '<button class="chat-msg-action" type="button" data-retry="1" ' +
-        'title="Ask the model again, same question">Retry</button>'
+        'title="Ask the model again, same question" aria-label="Retry">' + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 12a8 8 0 11-2.34-5.66"/><path d="M20 4v5h-5"/></svg>' + "</button>"
       : "") +
     // On the question rather than the answer: a bad reply is usually a badly-put
     // question, and retyping it by hand was the only way to change one. Editing
@@ -580,7 +580,7 @@ function messageHtml(m, index) {
     (m.role === "user"
       ? '<button class="chat-msg-action" type="button" data-edit="' +
         index +
-        '" title="Put this back in the box and drop everything after it">Edit</button>'
+        '" title="Put this back in the box — nothing is dropped until you send" aria-label="Edit">' + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20h4l10-10a2.83 2.83 0 10-4-4L4 16v4z"/><path d="M13.5 6.5L17.5 10.5"/></svg>' + "</button>"
       : "") +
     "</div>" +
     "</div>"
@@ -908,6 +908,17 @@ async function sendChatMessage() {
     return;
   }
 
+  // The edit's destructive half, deferred to here from editMessage: the turns
+  // after the amended message go now, because now is when they are actually
+  // being replaced.
+  if (pendingEditIndex !== null) {
+    activeChatMessages = activeChatMessages.slice(0, pendingEditIndex);
+    pendingEditIndex = null;
+    document.getElementById("chatEditBanner")?.remove();
+    renderMessages();
+    persistActiveChat();
+  }
+
   const profile = llmProfiles.find((p) => p.id === activeLlmProfileId) || llmProfiles[0];
   if (!profile) {
     showToast("No LLM configured — add one in Settings");
@@ -1101,14 +1112,49 @@ async function retryLastAnswer() {
 // Truncating is the point rather than a side effect: the model answers the whole
 // transcript, so an edited question left sitting above its own old answer would
 // be asked in the presence of a reply to the question it no longer is.
+// Which message is being amended, or null. The truncation this implies used to
+// happen the instant Edit was pressed — which meant a misclick silently threw
+// away every turn after it with no way back. Nothing is destroyed now until the
+// amended message is actually SENT, so Edit is a reversible intention rather
+// than an irreversible act, and Cancel costs nothing to implement because there
+// is nothing to restore.
+let pendingEditIndex = null;
+
+function showEditBanner() {
+  if (document.getElementById("chatEditBanner")) return;
+  const banner = document.createElement("div");
+  banner.className = "chat-edit-banner";
+  banner.id = "chatEditBanner";
+  const label = document.createElement("span");
+  label.textContent = "Editing an earlier message — sending will drop the turns after it";
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.className = "chat-edit-cancel";
+  cancel.textContent = "Cancel";
+  cancel.addEventListener("click", cancelEdit);
+  banner.appendChild(label);
+  banner.appendChild(cancel);
+  // A SIBLING above the composer, not a child of it: .chat-composer is a
+  // horizontal flex row (mascot, textarea, send), so a child would be squeezed
+  // in beside the textarea instead of sitting over it.
+  chatComposerEl.parentNode.insertBefore(banner, chatComposerEl);
+}
+
+function cancelEdit() {
+  if (pendingEditIndex === null) return;
+  pendingEditIndex = null;
+  document.getElementById("chatEditBanner")?.remove();
+  chatInput.value = "";
+  autoResizeChatInput();
+}
+
 function editMessage(index) {
   if (sendingMessage) return;
   const message = activeChatMessages[index];
   if (!message || message.role !== "user") return;
   chatInput.value = message.content;
-  activeChatMessages = activeChatMessages.slice(0, index);
-  renderMessages();
-  persistActiveChat();
+  pendingEditIndex = index;
+  showEditBanner();
   autoResizeChatInput();
   chatInput.focus();
   // To the end, not selected: this is a message to amend, and a selection would
@@ -1435,4 +1481,7 @@ chatInput.addEventListener("keydown", (e) => {
     e.preventDefault();
     if (!sendingMessage) sendChatMessage();
   }
+  // Escape backs out of an edit. The banner's own button is the discoverable
+  // way; this is the one a keyboard reaches for first.
+  if (e.key === "Escape") cancelEdit();
 });
