@@ -2,6 +2,11 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <!-- Stops the webview asking for /favicon.ico, which the asset
+         protocol answers with a 500 and logs as an error on every
+         launch. These windows are frameless overlays with no tab to
+         put an icon in, so there is nothing to point it at. -->
+    <link rel="icon" href="data:," />
     <!-- Order matters: base/quick-menu/notice/github/agent were split out of one
          stylesheet, so keeping the link order preserves the original cascade. -->
     <link rel="stylesheet" href="base.css" />
@@ -10,15 +15,15 @@
     <link rel="stylesheet" href="github/github-notice.css" />
     <link rel="stylesheet" href="mail/mail-notice.css" />
     <link rel="stylesheet" href="agent/agent-notice.css" />
-    <link rel="stylesheet" href="pip/pip.css" />
+    <link rel="stylesheet" href="../shared/pixy/pixy.css" />
     <link rel="stylesheet" href="spotify/spotify.css" />
     <link rel="stylesheet" href="voice/voice.css" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Mascot</title>
     <script type="module" src="./main.js" defer></script>
     <script type="module" src="./spotify/spotify.js" defer></script>
-    <script type="module" src="./pip/pipstate.js" defer></script>
-    <script type="module" src="./pip/signals.js" defer></script>
+    <script type="module" src="./pixy/pixystate.js" defer></script>
+    <script type="module" src="./pixy/signals.js" defer></script>
     <!-- Loaded for its side effects only (like signals.js): it starts the voice
          assistant if Settings has it enabled, and listens for that toggle. -->
     <script type="module" src="./voice/voice.js" defer></script>
@@ -26,15 +31,15 @@
 
   <body class="state-idle">
     <div id="mascot">
-      <div class="pip-row" id="pip-row">
-        <div class="pip-slot">
-          <canvas class="pip-canvas" id="pip-canvas" width="24" height="24" aria-hidden="true"></canvas>
+      <div class="pixy-row" id="pixy-row">
+        <div class="pixy-slot">
+          <canvas class="pixy-canvas" id="pixy-canvas" width="24" height="24" aria-hidden="true"></canvas>
         </div>
-        <div class="pip-text">
-          <span class="pip-title" id="pip-title">Idle</span>
-          <span class="pip-sub" id="pip-sub">standing by</span>
+        <div class="pixy-text">
+          <span class="pixy-title" id="pixy-title">Idle</span>
+          <span class="pixy-sub" id="pixy-sub">standing by</span>
         </div>
-        <div class="pip-ind" id="pip-ind">
+        <div class="pixy-ind" id="pixy-ind">
           <div class="i-dots"><i></i><i></i><i></i></div>
           <div class="i-ring"></div>
           <div class="i-caret"></div>

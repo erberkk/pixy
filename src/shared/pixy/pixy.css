@@ -1,52 +1,52 @@
-/* Pip pixel-art sprite: pill row (slot canvas + title/sub + indicator) and
-   the state->accent color table, ported from pip-pixel.html. This file only
+/* Pixy pixel-art sprite: pill row (slot canvas + title/sub + indicator) and
+   the state->accent color table, ported from pixy-pixel.html. This file only
    controls the SPRITE's look (accent color, pose indicator, text) via
-   #mascot's data-pip-state attribute — it never sets #mascot's box size or
+   #mascot's data-pixy-state attribute — it never sets #mascot's box size or
    visibility, which stays driven by main.js's existing state-* classes on
-   <body> (see pip.js's header comment for why the two are kept separate). */
+   <body> (see pixy.js's header comment for why the two are kept separate). */
 
 #mascot {
   --a: #5ad1e6;
   --a2: #b6f0fa;
 }
 
-#mascot[data-pip-state="thinking"] { --a: #a58bff; }
-#mascot[data-pip-state="coding"] { --a: #4fd68a; }
-#mascot[data-pip-state="debugging"] { --a: #ff9d5c; }
-#mascot[data-pip-state="reviewing"] { --a: #9fb2d8; }
-#mascot[data-pip-state="deploying"] { --a: #e864d8; }
-#mascot[data-pip-state="syncing"] { --a: #3fd0c0; }
-#mascot[data-pip-state="waiting"] { --a: #d9c27a; }
-#mascot[data-pip-state="working"] { --a: #59a9ff; }
-#mascot[data-pip-state="writing"] { --a: #ffd9a0; }
-#mascot[data-pip-state="call"] { --a: #6be0a8; }
-#mascot[data-pip-state="break"] { --a: #f0a868; }
-#mascot[data-pip-state="listening"] { --a: #ff7ab8; }
-#mascot[data-pip-state="streaming"] { --a: #ff5c8a; }
-#mascot[data-pip-state="happy"] { --a: #ffc247; }
-#mascot[data-pip-state="alert"] { --a: #ff6f7d; }
-#mascot[data-pip-state="sleeping"] { --a: #6f6be0; }
-#mascot[data-pip-state="lowpower"] { --a: #8d93a8; }
-/* app-specific extras beyond the original pip-pixel set (see PIP_META in
-   pip.js) — gaming is deliberately excluded from automatic wiring but keeps
-   its accent/pose here so Pip.set('gaming') still works if invoked by hand. */
-#mascot[data-pip-state="gaming"] { --a: #b06bff; }
-#mascot[data-pip-state="juggling"] { --a: #55c8e0; }
-#mascot[data-pip-state="forgotten"] { --a: #ff8a5c; }
-#mascot[data-pip-state="review_requested"] { --a: #7ea8ff; }
-#mascot[data-pip-state="mentioned"] { --a: #c48bff; }
-#mascot[data-pip-state="assigned"] { --a: #58a9ff; }
-#mascot[data-pip-state="digest_ready"] { --a: #e8b04b; }
-#mascot[data-pip-state="welcome_back"] { --a: #ffc247; }
+#mascot[data-pixy-state="thinking"] { --a: #a58bff; }
+#mascot[data-pixy-state="coding"] { --a: #4fd68a; }
+#mascot[data-pixy-state="debugging"] { --a: #ff9d5c; }
+#mascot[data-pixy-state="reviewing"] { --a: #9fb2d8; }
+#mascot[data-pixy-state="deploying"] { --a: #e864d8; }
+#mascot[data-pixy-state="syncing"] { --a: #3fd0c0; }
+#mascot[data-pixy-state="waiting"] { --a: #d9c27a; }
+#mascot[data-pixy-state="working"] { --a: #59a9ff; }
+#mascot[data-pixy-state="writing"] { --a: #ffd9a0; }
+#mascot[data-pixy-state="call"] { --a: #6be0a8; }
+#mascot[data-pixy-state="break"] { --a: #f0a868; }
+#mascot[data-pixy-state="listening"] { --a: #ff7ab8; }
+#mascot[data-pixy-state="streaming"] { --a: #ff5c8a; }
+#mascot[data-pixy-state="happy"] { --a: #ffc247; }
+#mascot[data-pixy-state="alert"] { --a: #ff6f7d; }
+#mascot[data-pixy-state="sleeping"] { --a: #6f6be0; }
+#mascot[data-pixy-state="lowpower"] { --a: #8d93a8; }
+/* app-specific extras beyond the original pixy-pixel set (see PIXY_META in
+   pixy.js) — gaming is deliberately excluded from automatic wiring but keeps
+   its accent/pose here so Pixy.set('gaming') still works if invoked by hand. */
+#mascot[data-pixy-state="gaming"] { --a: #b06bff; }
+#mascot[data-pixy-state="juggling"] { --a: #55c8e0; }
+#mascot[data-pixy-state="forgotten"] { --a: #ff8a5c; }
+#mascot[data-pixy-state="review_requested"] { --a: #7ea8ff; }
+#mascot[data-pixy-state="mentioned"] { --a: #c48bff; }
+#mascot[data-pixy-state="assigned"] { --a: #58a9ff; }
+#mascot[data-pixy-state="digest_ready"] { --a: #e8b04b; }
+#mascot[data-pixy-state="welcome_back"] { --a: #ffc247; }
 /* Mail keeps the blue of the mail notices themselves (mail-notice.css), and a
-   reply keeps the green that marks one on the morning card — the pip and the
+   reply keeps the green that marks one on the morning card — the pixy and the
    card it belongs to should not disagree about what colour mail is. */
-#mascot[data-pip-state="mail_new"] { --a: #58a6ff; }
-#mascot[data-pip-state="mail_reply"] { --a: #3fb950; }
-#mascot[data-pip-state="brief_ready"] { --a: #58a6ff; }
-#mascot[data-pip-state="meeting_soon"] { --a: #e8b04b; }
+#mascot[data-pixy-state="mail_new"] { --a: #58a6ff; }
+#mascot[data-pixy-state="mail_reply"] { --a: #3fb950; }
+#mascot[data-pixy-state="brief_ready"] { --a: #58a6ff; }
+#mascot[data-pixy-state="meeting_soon"] { --a: #e8b04b; }
 
-.pip-row {
+.pixy-row {
   display: flex;
   align-items: center;
   justify-content: flex-start;
@@ -55,11 +55,11 @@
   min-width: 0;
 }
 
-/* True idle: only .pip-slot is visible in this row (text/indicator hidden
+/* True idle: only .pixy-slot is visible in this row (text/indicator hidden
    below) — shrink the row to that icon's own width instead of staying
    100% wide with flex-start, which left it pinned to the left edge inside
    #mascot's circle instead of centered. */
-#mascot[data-pip-state="idle"] .pip-row {
+#mascot[data-pixy-state="idle"] .pixy-row {
   width: auto;
   justify-content: center;
 }
@@ -67,7 +67,7 @@
 /* No background of its own — #mascot's own background (styles.css) is the
    only layer; giving the icon a second background here read as a
    double-layered box behind box look. */
-.pip-slot {
+.pixy-slot {
   flex: 0 0 36px;
   width: 36px;
   height: 36px;
@@ -75,7 +75,7 @@
   place-items: center;
 }
 
-.pip-canvas {
+.pixy-canvas {
   width: 36px;
   height: 36px;
   image-rendering: pixelated;
@@ -86,19 +86,19 @@
 /* True idle: mascot alone, no text competing for space, sized up so the
    pixel art actually reads clearly instead of sitting small in a wide
    empty pill. */
-#mascot[data-pip-state="idle"] .pip-slot,
-#mascot[data-pip-state="idle"] .pip-canvas {
+#mascot[data-pixy-state="idle"] .pixy-slot,
+#mascot[data-pixy-state="idle"] .pixy-canvas {
   flex-basis: 44px;
   width: 44px;
   height: 44px;
 }
 
-#mascot[data-pip-state="idle"] .pip-text,
-#mascot[data-pip-state="idle"] .pip-ind {
+#mascot[data-pixy-state="idle"] .pixy-text,
+#mascot[data-pixy-state="idle"] .pixy-ind {
   display: none;
 }
 
-.pip-text {
+.pixy-text {
   flex: 1 1 auto;
   min-width: 0;
   display: flex;
@@ -109,10 +109,10 @@
 
 /* Minimal by design — just enough to name the current state, not a full
    label + description pair (that read as unnecessarily wide/loud for a
-   small always-on-top pill). See .pip-sub below: intentionally hidden.
+   small always-on-top pill). See .pixy-sub below: intentionally hidden.
    Centered (not left-aligned against the icon) so it reads as sitting
    between the icon and the indicator, not crowded against either one. */
-.pip-title {
+.pixy-title {
   font-family: -apple-system, "Segoe UI", sans-serif;
   font-size: 11px;
   font-weight: 600;
@@ -125,29 +125,29 @@
   text-overflow: ellipsis;
 }
 
-.pip-sub {
+.pixy-sub {
   display: none;
 }
 
-.pip-ind {
+.pixy-ind {
   flex: 0 0 auto;
   width: 16px;
   height: 16px;
   display: grid;
   place-items: center;
 }
-.pip-ind > * {
+.pixy-ind > * {
   display: none;
 }
-.pip-ind[data-ind="dots"] .i-dots,
-.pip-ind[data-ind="ring"] .i-ring,
-.pip-ind[data-ind="caret"] .i-caret,
-.pip-ind[data-ind="eq"] .i-eq,
-.pip-ind[data-ind="moon"] .i-moon,
-.pip-ind[data-ind="check"] .i-check,
-.pip-ind[data-ind="bang"] .i-bang,
-.pip-ind[data-ind="rec"] .i-rec,
-.pip-ind[data-ind="bat"] .i-bat {
+.pixy-ind[data-ind="dots"] .i-dots,
+.pixy-ind[data-ind="ring"] .i-ring,
+.pixy-ind[data-ind="caret"] .i-caret,
+.pixy-ind[data-ind="eq"] .i-eq,
+.pixy-ind[data-ind="moon"] .i-moon,
+.pixy-ind[data-ind="check"] .i-check,
+.pixy-ind[data-ind="bang"] .i-bang,
+.pixy-ind[data-ind="rec"] .i-rec,
+.pixy-ind[data-ind="bat"] .i-bat {
   display: flex;
 }
 
@@ -159,7 +159,7 @@
   width: 3px;
   height: 3px;
   background: var(--a);
-  animation: pip-dot 1.2s steps(1) infinite;
+  animation: pixy-dot 1.2s steps(1) infinite;
 }
 .i-dots i:nth-child(2) {
   animation-delay: 0.2s;
@@ -167,7 +167,7 @@
 .i-dots i:nth-child(3) {
   animation-delay: 0.4s;
 }
-@keyframes pip-dot {
+@keyframes pixy-dot {
   0%,
   60% {
     opacity: 0.2;
@@ -183,9 +183,9 @@
   background: conic-gradient(from 0deg, transparent 0 30%, var(--a) 95%, transparent);
   -webkit-mask: radial-gradient(circle, transparent 3.6px, #000 4.1px);
   mask: radial-gradient(circle, transparent 3.6px, #000 4.1px);
-  animation: pip-spin 1s steps(8) infinite;
+  animation: pixy-spin 1s steps(8) infinite;
 }
-@keyframes pip-spin {
+@keyframes pixy-spin {
   to {
     transform: rotate(360deg);
   }
@@ -195,9 +195,9 @@
   width: 6px;
   height: 11px;
   background: var(--a);
-  animation: pip-blinkc 1s steps(1) infinite;
+  animation: pixy-blinkc 1s steps(1) infinite;
 }
-@keyframes pip-blinkc {
+@keyframes pixy-blinkc {
   50% {
     opacity: 0;
   }
@@ -212,7 +212,7 @@
   width: 2px;
   height: 3px;
   background: var(--a);
-  animation: pip-eq 0.5s steps(3) infinite alternate;
+  animation: pixy-eq 0.5s steps(3) infinite alternate;
 }
 .i-eq i:nth-child(2) {
   animation-delay: -0.2s;
@@ -223,7 +223,7 @@
 .i-eq i:nth-child(4) {
   animation-delay: -0.1s;
 }
-@keyframes pip-eq {
+@keyframes pixy-eq {
   to {
     height: 13px;
   }
@@ -233,9 +233,9 @@
   width: 11px;
   height: 11px;
   box-shadow: inset -4px 2px 0 0 var(--a);
-  animation: pip-br 4s steps(2) infinite;
+  animation: pixy-br 4s steps(2) infinite;
 }
-@keyframes pip-br {
+@keyframes pixy-br {
   0%,
   100% {
     opacity: 0.45;
@@ -260,14 +260,14 @@
   width: 6px;
   height: 6px;
   background: var(--a);
-  animation: pip-rec 1.1s steps(1) infinite;
+  animation: pixy-rec 1.1s steps(1) infinite;
 }
 .i-rec b {
   font: 600 7px/1 ui-monospace, Consolas, monospace;
   letter-spacing: 0.1em;
   color: var(--a);
 }
-@keyframes pip-rec {
+@keyframes pixy-rec {
   50% {
     opacity: 0.15;
   }
@@ -294,18 +294,18 @@
   width: 3px;
   height: 100%;
   background: var(--a);
-  animation: pip-drain 3s steps(1) infinite;
+  animation: pixy-drain 3s steps(1) infinite;
 }
-@keyframes pip-drain {
+@keyframes pixy-drain {
   50% {
     opacity: 0.2;
   }
 }
 
 .i-bang {
-  animation: pip-nudge 0.4s steps(2) infinite;
+  animation: pixy-nudge 0.4s steps(2) infinite;
 }
-@keyframes pip-nudge {
+@keyframes pixy-nudge {
   50% {
     transform: translateX(2px);
   }

@@ -39,7 +39,7 @@ pub fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
 
     TrayIconBuilder::new()
         // The mascot rather than the default window icon (which is still the
-        // stock Tauri mark). Same pip sprite the widget draws itself, in the
+        // stock Tauri mark). Same pixy sprite the widget draws itself, in the
         // muted grey it wears on the chat screen — see icons/tray.png.
         .icon(Image::from_bytes(include_bytes!("../../icons/tray.png"))?)
         .menu(&tray_menu)

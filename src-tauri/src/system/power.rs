@@ -1,4 +1,4 @@
-// OS-level ambient signals for the Pip sprite: battery state (lowpower) and
+// OS-level ambient signals for the Pixy sprite: battery state (lowpower) and
 // how long since the user last touched keyboard/mouse anywhere on the
 // machine (sleeping) — deliberately OS-wide via GetLastInputInfo rather than
 // tracking clicks inside this app's own windows, since "the user stepped

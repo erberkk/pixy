@@ -6,7 +6,7 @@ import { invoke } from "../../shared/tauri.js";
 import { beep } from "../lib/sound.js";
 import { reportHotRectSoon } from "../lib/hotrect.js";
 import { clearRevertTimer, closePinnedCard, lockNotice } from "../notice/notice.js";
-import { refreshAmbient } from "../pip/signals.js";
+import { refreshAmbient } from "../pixy/signals.js";
 
 // Whatever the hook chose to call itself, for the card header. `?label=` in the
 // hook URL is optional and free-form: it used to name one of this app's own

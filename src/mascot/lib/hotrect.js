@@ -2,7 +2,7 @@
 // pill itself, so the backend needs to know that rectangle. Kept in its own
 // module because everything that changes the window's visible shape has to
 // re-report it — and having it here rather than in main.js is what keeps the
-// import graph acyclic (spotify.js and pipstate.js both need it).
+// import graph acyclic (spotify.js and pixystate.js both need it).
 import { invoke } from "../../shared/tauri.js";
 
 export function reportHotRect() {

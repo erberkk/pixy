@@ -187,7 +187,7 @@
    it once the card is tall. Same complaint as the GitHub notices had before
    their icon was lined up: centred against a tall box reads as an accident.
    The margin lines its 24px canvas up with the middle of the 34px header row. */
-.state-mail_brief .pip-row {
+.state-mail_brief .pixy-row {
   align-self: start;
   margin-top: 5px;
 }

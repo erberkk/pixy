@@ -40,9 +40,9 @@
   max-height: 220px;
 }
 
-/* The mascot pill is a two-column grid: the pip in column 1, this notice in
+/* The mascot pill is a two-column grid: the pixy in column 1, this notice in
    column 2 (see notice.css). Centring the icon+text inside that column put the
-   pair in the middle of whatever width was left, so the gap between the pip and
+   pair in the middle of whatever width was left, so the gap between the pixy and
    the icon was several times the gap between the icon and the text — and it
    moved every time the text length changed. Left-aligned, the three read as one
    row with the same 8px rhythm throughout, whatever the message says.

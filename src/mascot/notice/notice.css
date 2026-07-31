@@ -10,15 +10,15 @@
    row, a hidden state, and a small strip above the content depending on
    which body-state currently owns the box — one consistent anchor point
    regardless of how wide/tall the box currently is. Two columns: 1 is the
-   icon (.pip-row — by default spans the FULL width too, since for the
-   plain ambient pill .pip-row already contains the title+indicator
+   icon (.pixy-row — by default spans the FULL width too, since for the
+   plain ambient pill .pixy-row already contains the title+indicator
    internally and .notice is hidden, so there's no separate column-2
    content competing for space; card/notice states below narrow it back to
    column 1 only and give .notice column 2). Flat solid background, no
    accent glow — the gradient/scanline texture and colored box-shadow glow
-   from the original pip-pixel design read as visual noise on this widget,
+   from the original pixy-pixel design read as visual noise on this widget,
    not a nice effect. Note: NO image-rendering:pixelated here — that
-   belongs only on .pip-canvas (see pip.css). */
+   belongs only on .pixy-canvas (see pixy.css). */
 #mascot {
   position: relative;
   margin-top: 8px;
@@ -38,23 +38,23 @@
   box-shadow: 0 2px 6px rgba(6, 8, 16, 0.4), 0 10px 22px -10px rgba(6, 8, 16, 0.65);
 }
 
-.pip-row {
+.pixy-row {
   grid-column: 1 / -1;
   grid-row: 1;
 }
 
 /* Card/notice states: the icon shrinks back to column 1 only (its
-   title/indicator are hidden internally — see the .pip-text/.pip-ind rules
+   title/indicator are hidden internally — see the .pixy-text/.pixy-ind rules
    below), vertically centered against the box's current height (whatever
    it happens to be right now) rather than pinned to top or bottom; .notice
    — and digest's Close button — take column 2. */
-.state-waiting_permission .pip-row,
-.state-waiting_input .pip-row,
-.state-github_merge .pip-row,
-.state-github_digest .pip-row,
-.state-mail_notice .pip-row,
-.state-mail_brief .pip-row,
-.state-agent_permission .pip-row {
+.state-waiting_permission .pixy-row,
+.state-waiting_input .pixy-row,
+.state-github_merge .pixy-row,
+.state-github_digest .pixy-row,
+.state-mail_notice .pixy-row,
+.state-mail_brief .pixy-row,
+.state-agent_permission .pixy-row {
   grid-column: 1;
   grid-row: 1 / -1;
   align-self: center;
@@ -71,20 +71,20 @@
   grid-column: 2;
 }
 
-.state-waiting_permission .pip-ind,
-.state-waiting_input .pip-ind,
-.state-github_merge .pip-ind,
-.state-github_digest .pip-ind,
-.state-mail_notice .pip-ind,
-.state-mail_brief .pip-ind,
-.state-agent_permission .pip-ind,
-.state-waiting_permission .pip-text,
-.state-waiting_input .pip-text,
-.state-github_merge .pip-text,
-.state-github_digest .pip-text,
-.state-mail_notice .pip-text,
-.state-mail_brief .pip-text,
-.state-agent_permission .pip-text {
+.state-waiting_permission .pixy-ind,
+.state-waiting_input .pixy-ind,
+.state-github_merge .pixy-ind,
+.state-github_digest .pixy-ind,
+.state-mail_notice .pixy-ind,
+.state-mail_brief .pixy-ind,
+.state-agent_permission .pixy-ind,
+.state-waiting_permission .pixy-text,
+.state-waiting_input .pixy-text,
+.state-github_merge .pixy-text,
+.state-github_digest .pixy-text,
+.state-mail_notice .pixy-text,
+.state-mail_brief .pixy-text,
+.state-agent_permission .pixy-text {
   display: none;
 }
 
@@ -148,7 +148,7 @@
    sized up since there's no content competing for space. Falls back to
    flex for this one case since a grid with unused 1fr track doesn't center
    a single lone item the way flex's justify-content does. */
-.state-idle #mascot[data-pip-state="idle"] {
+.state-idle #mascot[data-pixy-state="idle"] {
   display: flex;
   width: 66px;
   height: 66px;

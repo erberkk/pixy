@@ -4,7 +4,7 @@
 import { listen, currentWindow } from "../shared/tauri.js";
 import { cancelSpotifyPanel } from "./spotify/spotify.js";
 import { closePinnedCard, setState } from "./notice/notice.js";
-import { clearEvent } from "./pip/pipstate.js";
+import { clearEvent } from "./pixy/pixystate.js";
 import { reportHotRectSoon } from "./lib/hotrect.js";
 import {
   showGithubDigestNotice,
@@ -134,7 +134,7 @@ window.addEventListener("DOMContentLoaded", () => {
   // whichever is showing and hands the screen to anything queued behind it.
   document.getElementById("card-close-btn").addEventListener("click", () => {
     closePinnedCard();
-    // The morning brief holds its pip pose for as long as it is up (see
+    // The morning brief holds its pixy pose for as long as it is up (see
     // signals.js), so closing it has to release that too or the postman would
     // stay on the pill for half an hour after the card is gone.
     clearEvent();

@@ -743,8 +743,8 @@
   display: none;
 }
 
-/* The chat mascot (composer avatar): same pip renderer as the main widget
-   (pip.js), but forced to a fixed muted grey regardless of state — a
+/* The chat mascot (composer avatar): same pixy renderer as the main widget
+   (pixy.js), but forced to a fixed muted grey regardless of state — a
    distinct, quieter "assistant" persona for this screen rather than the
    colorful ambient moods used elsewhere. */
 .chat-mascot {
@@ -757,7 +757,7 @@
   width: 30px;
   height: 30px;
 }
-.chat-mascot-small .pip-canvas {
+.chat-mascot-small .pixy-canvas {
   width: 30px;
   height: 30px;
   image-rendering: pixelated;

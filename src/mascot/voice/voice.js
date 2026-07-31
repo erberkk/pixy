@@ -12,7 +12,7 @@
 // of speech and re-asks the OS for the mic each time.
 import { invoke, listen } from "../../shared/tauri.js";
 import { loadTunables, t } from "../../shared/tunables.js";
-import { pushEvent, clearEvent } from "../pip/pipstate.js";
+import { pushEvent, clearEvent } from "../pixy/pixystate.js";
 import { showTransientNotice } from "../notice/notice.js";
 import { beep } from "../lib/sound.js";
 import { closeMic, isOpen, onHop, openMic } from "./mic.js";

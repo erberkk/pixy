@@ -1,4 +1,4 @@
-// Pip pixel-art sprite renderer — ported from pip-pixel.html (24x24 canvas,
+// Pixy pixel-art sprite renderer — ported from pixy-pixel.html (24x24 canvas,
 // drawn at 10fps on purpose so it reads as pixel art, not smooth animation).
 // Sprite data, palette math and the draw() switch are kept as close to the
 // source as possible; only the plumbing around it (module exports, which
@@ -79,12 +79,12 @@ const FACES = {
 const BX = 5; // body left edge
 const BY = 7; // body top edge (before bob)
 
-// title/sub/indicator per state — ported from pip-pixel.html's STATES table,
+// title/sub/indicator per state — ported from pixy-pixel.html's STATES table,
 // trimmed of the fields (line/progress/metaL/metaR) that belonged to its
 // click-to-expand detail panel, which this app doesn't have (the permission
-// card, digest card and Spotify panel already cover that role — see pip.js's
+// card, digest card and Spotify panel already cover that role — see pixy.js's
 // header comment / the plan discussion for why that panel wasn't ported).
-export const PIP_META = {
+export const PIXY_META = {
   idle: { ind: "none", title: "Idle", sub: "standing by" },
   thinking: { ind: "dots", title: "Thinking", sub: "working through it" },
   working: { ind: "ring", title: "Working", sub: "running the build" },
@@ -104,7 +104,7 @@ export const PIP_META = {
   listening: { ind: "eq", title: "Listening", sub: "now playing" },
   gaming: { ind: "caret", title: "Gaming", sub: "do not disturb" },
   streaming: { ind: "rec", title: "Streaming", sub: "you are live" },
-  // --- app-specific states beyond the original pip-pixel set ---
+  // --- app-specific states beyond the original pixy-pixel set ---
   // The voice assistant's three turns (voice/voice.js). Distinct from
   // `listening`, which is Spotify playback — these mean the microphone is
   // actually open and pointed at you. `thinking` is reused for the gap between
@@ -179,9 +179,9 @@ function shade(hex, amt) {
   );
 }
 
-// Reads --a off the element carrying data-pip-state (set per-state in
-// pip.css) rather than off <body> — the layout state (body.className) and
-// the ambient/mood state (data-pip-state) are deliberately two separate
+// Reads --a off the element carrying data-pixy-state (set per-state in
+// pixy.css) rather than off <body> — the layout state (body.className) and
+// the ambient/mood state (data-pixy-state) are deliberately two separate
 // attributes so this sprite's accent never has to fight the pinned-card /
 // notice layout system in main.js.
 function readPalette(accentEl) {
@@ -340,7 +340,7 @@ function draw() {
       face = "wide";
       blinks = false;
       break;
-    // --- app-specific states beyond the original pip-pixel set ---
+    // --- app-specific states beyond the original pixy-pixel set ---
     case "juggling":
       by += [0, -1, 0, -1, 0, 0][t % 6];
       faceDx = [-1, 0, 1, 0][Math.floor(t / 2) % 4]; // eyes darting between sessions
@@ -651,18 +651,18 @@ function scheduleTick() {
 let els = null;
 
 // els: { canvas, root, ind, title, sub }.
-// root is the element carrying data-pip-state + --a (see pip.css) — kept
+// root is the element carrying data-pixy-state + --a (see pixy.css) — kept
 // separate from <body> so the sprite's mood/accent never touches the
 // existing layout-state class system in main.js (body.className stays
-// exactly the current 7-value scheme; see main.js/pipstate.js).
-export function initPip(elements) {
+// exactly the current 7-value scheme; see main.js/pixystate.js).
+export function initPixy(elements) {
   els = elements;
   const off = document.createElement("canvas");
   off.width = off.height = 24;
   ox = off.getContext("2d");
   targetCtx = els.canvas.getContext("2d");
   targetCtx.imageSmoothingEnabled = false;
-  els.root.dataset.pipState = "idle";
+  els.root.dataset.pixyState = "idle";
   readPalette(els.root);
   applyMeta("idle");
   tick = 0;
@@ -671,16 +671,16 @@ export function initPip(elements) {
 }
 
 function applyMeta(name, overrides = {}) {
-  const meta = { ...(PIP_META[name] || PIP_META.idle), ...overrides };
+  const meta = { ...(PIXY_META[name] || PIXY_META.idle), ...overrides };
   if (els.ind) els.ind.dataset.ind = meta.ind || "none";
   if (els.title) els.title.textContent = meta.title || "";
   if (els.sub) els.sub.textContent = meta.sub || "";
 }
 
-export function setPipState(name, overrides = {}) {
+export function setPixyState(name, overrides = {}) {
   if (!els) return;
-  current = PIP_META[name] ? name : "idle";
-  els.root.dataset.pipState = current;
+  current = PIXY_META[name] ? name : "idle";
+  els.root.dataset.pixyState = current;
   readPalette(els.root);
   applyMeta(current, overrides);
   tick = 0;
@@ -688,13 +688,13 @@ export function setPipState(name, overrides = {}) {
   scheduleTick();
 }
 
-export function pausePipAnimation() {
+export function pausePixyAnimation() {
   if (tickTimer) {
     clearInterval(tickTimer);
     tickTimer = null;
   }
 }
 
-export function resumePipAnimation() {
+export function resumePixyAnimation() {
   if (els) scheduleTick();
 }

@@ -1,6 +1,6 @@
-// Wires real, already-available backend signals to the Pip sprite's mood
-// (see pipstate.js) — this module never touches body.className / the
-// existing notice system in main.js, it only decides what Pip's ambient
+// Wires real, already-available backend signals to the Pixy sprite's mood
+// (see pixystate.js) — this module never touches body.className / the
+// existing notice system in main.js, it only decides what Pixy's ambient
 // pose + occasional event pulse should be. Two independent halves:
 //
 //   1. An ambient poll loop (every 5s): terminal sessions, audio/mic state,
@@ -9,7 +9,7 @@
 //      review-requested, issue updates, digest ready) -> pushEvent(name).
 //
 // `gaming` and `juggling` are intentionally not wired here; both still exist in
-// pip.js/pip.css for manual use. `gaming` has no reliable signal. `juggling`
+// pixy.js/pixy.css for manual use. `gaming` has no reliable signal. `juggling`
 // (two or more Claude sessions at once) used to be counted from this app's own
 // pooled terminals, which are gone — the hooks carry a session_id that could
 // bring it back for real terminals, but that isn't wired yet.
@@ -18,7 +18,7 @@
 // per turn, so this would flicker between moods every tool call instead of
 // reading as one continuous ambient pose — "coding" stays the single
 // umbrella state for any real tool activity.
-import { setAmbient, pushEvent } from "./pipstate.js";
+import { setAmbient, pushEvent } from "./pixystate.js";
 
 import { invoke, listen } from "../../shared/tauri.js";
 // Every threshold below is a setting rather than a constant — how long "away
@@ -183,7 +183,7 @@ window.addEventListener("DOMContentLoaded", () => {
   // A pending decision is the highest-priority, most time-sensitive ambient
   // signal there is — recomputing immediately instead of waiting for the
   // next poll tick is what makes the mascot's mood inside the permission
-  // card itself (see styles.css's mini pip icon) switch to "waiting" right
+  // card itself (see styles.css's mini pixy icon) switch to "waiting" right
   // away instead of still showing whatever it was doing a moment before
   // (e.g. "listening") for as long as the poll interval.
   listen("mascot-permission-request", () => {

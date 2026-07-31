@@ -2,6 +2,11 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <!-- Stops the webview asking for /favicon.ico, which the asset
+         protocol answers with a 500 and logs as an error on every
+         launch. These windows are frameless overlays with no tab to
+         put an icon in, so there is nothing to point it at. -->
+    <link rel="icon" href="data:," />
     <link rel="stylesheet" href="settings.css" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Settings</title>

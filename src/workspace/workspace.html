@@ -2,6 +2,11 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <!-- Stops the webview asking for /favicon.ico, which the asset
+         protocol answers with a 500 and logs as an error on every
+         launch. These windows are frameless overlays with no tab to
+         put an icon in, so there is nothing to point it at. -->
+    <link rel="icon" href="data:," />
     <!-- Order matters: these four were split out of one stylesheet, so keeping
          the link order preserves the original cascade. -->
     <link rel="stylesheet" href="workspace.css" />
@@ -377,7 +382,7 @@
 
         <form class="chat-composer" id="chatComposer">
           <div class="chat-mascot chat-mascot-small" id="chatMascotRootSmall">
-            <canvas id="chatMascotCanvasSmall" class="pip-canvas" width="24" height="24"></canvas>
+            <canvas id="chatMascotCanvasSmall" class="pixy-canvas" width="24" height="24"></canvas>
           </div>
           <button type="button" class="icon-btn" id="chatAttachBtn" title="Attach an image or text file">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>

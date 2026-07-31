@@ -2,7 +2,7 @@
 // ai/chat.rs (one JSON file per conversation) and ai/llm.rs's streaming
 // send_chat_message. Unrelated to the Claude Code hook plumbing in
 // agent/server.rs — this is a plain user <-> local-model chat.
-import { initPip, setPipState } from "../../mascot/pip/pip.js";
+import { initPixy, setPixyState } from "../../shared/pixy/pixy.js";
 import { invoke, listen } from "../../shared/tauri.js";
 import { bindCopyButton, copyText, escapeAttr, escapeHtml, markdownToHtml } from "../../shared/markdown.js";
 import { timeAgo } from "../../shared/format.js";
@@ -122,7 +122,7 @@ document.addEventListener("keydown", (event) => {
 export async function loadChatMode() {
   if (!chatModeInited) {
     chatModeInited = true;
-    initPip({
+    initPixy({
       canvas: el("chatMascotCanvasSmall"),
       root: el("chatMascotRootSmall"),
     });
@@ -1008,7 +1008,7 @@ async function sendChatMessage() {
 async function runAssistantTurn(profile, { wireContent, recallPromise } = {}) {
   sendingMessage = true;
   updateComposerState();
-  setPipState("chat_typing");
+  setPixyState("chat_typing");
 
   const chatId = activeChatId;
   streamingChatId = chatId;
@@ -1135,7 +1135,7 @@ function finishStreaming() {
   sendingMessage = false;
   chatSendBtn.disabled = false;
   updateComposerState();
-  setPipState("chat_idle");
+  setPixyState("chat_idle");
   // Only the turn that just finished — see renderLastMessage. Repainting the
   // whole list here is what used to throw away the reader's place and any text
   // they had selected.

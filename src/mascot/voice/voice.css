@@ -1,5 +1,5 @@
 /* The voice assistant's own notice state (voice/voice.js). The listening,
-   thinking and answering turns need no CSS at all — they are pip states, drawn
+   thinking and answering turns need no CSS at all — they are pixy states, drawn
    on the canvas — so the only thing styled here is the error message, which
    needs words and therefore the notice area.
 
@@ -19,7 +19,7 @@
   --a: #e8b04b;
 }
 
-.state-voice_error .pip-row {
+.state-voice_error .pixy-row {
   grid-column: 1;
   grid-row: 1 / -1;
   align-self: center;
@@ -39,7 +39,7 @@
   overflow-wrap: anywhere;
 }
 
-.state-voice_error .pip-ind,
-.state-voice_error .pip-text {
+.state-voice_error .pixy-ind,
+.state-voice_error .pixy-text {
   display: none;
 }

@@ -34,7 +34,7 @@
    card stacked vertically here rather than the UI showing/queuing them one
    at a time. Scrolls internally if the stack (or even a single long command/
    diff) outgrows this budget instead of growing the window forever.
-   #mascot is a GRID container here (see .pip-row rules above), not flex —
+   #mascot is a GRID container here (see .pixy-row rules above), not flex —
    `flex: 1 1 auto` on a grid item does nothing, and a grid item's intrinsic
    (fit-content) sizing pass largely ignores its own `overflow-y: auto` when
    computing the PARENT's fit-content height, so #mascot was growing to fit
@@ -263,7 +263,8 @@
 
 /* AskUserQuestion rendering — Claude Code's own multi-choice prompt, shown
    as tappable chips instead of the Bash/Write/etc Approve/Deny card (see
-   main.js's buildQuestionUI). Answers travel back through the same
+   buildQuestionUI in this folder's agent-notice.js). Answers travel back
+   through the same
    PermissionRequest hook response as approve/deny, just with updatedInput
    set instead of left empty. */
 /* Centered as a unit, not left-aligned — .notice sets text-align:left for
