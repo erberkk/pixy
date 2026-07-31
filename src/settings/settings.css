@@ -988,6 +988,166 @@ body {
    setting. Label on the left, control on the right, help underneath both:
    thirty stacked label-over-input pairs is a very tall form to read. */
 
+/* --- Advanced's filter bar ---------------------------------------------------
+   Sticky at the top of the scrolling content pane. The negative side margins
+   cancel the section's own 24px padding so the bar's background spans the full
+   width — without them, rows would scroll visibly through the gap at either
+   side of it. */
+.tunable-filter {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin: 0 -24px;
+  padding: 4px 24px 11px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.tunable-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.tunable-search > svg {
+  position: absolute;
+  left: 11px;
+  width: 14px;
+  height: 14px;
+  color: var(--text-faint);
+  pointer-events: none;
+}
+
+.tunable-search input {
+  width: 100%;
+  background: var(--bg-input);
+  border: 1px solid #2a2a2e;
+  border-radius: 8px;
+  padding: 8px 32px 8px 33px;
+  color: var(--text);
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+  user-select: text;
+  -webkit-user-select: text;
+  transition: border-color 0.12s var(--ease), box-shadow 0.12s var(--ease);
+}
+
+/* The webview draws its own clear button on a search field, in its own style
+   and in the wrong place — this section supplies one that matches. */
+.tunable-search input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.tunable-search input::placeholder {
+  color: #47474d;
+}
+
+.tunable-search input:hover {
+  border-color: #35353a;
+}
+
+.tunable-search input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.tunable-search-clear {
+  position: absolute;
+  right: 5px;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  transition: color 0.12s var(--ease), background 0.12s var(--ease);
+}
+
+.tunable-search-clear svg {
+  width: 13px;
+  height: 13px;
+}
+
+.tunable-search-clear:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+.tunable-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+/* Same chip language as the workspace's memory filters, so "filter by group"
+   looks like the same idea in both windows. */
+.tunable-chip {
+  background: var(--bg-card);
+  border: 1px solid var(--border-soft);
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 9px;
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s var(--ease), border-color 0.12s var(--ease),
+    color 0.12s var(--ease);
+}
+
+.tunable-chip:hover {
+  border-color: #35353a;
+  color: var(--text);
+}
+
+.tunable-chip.active {
+  background: var(--accent-soft);
+  border-color: transparent;
+  color: var(--accent);
+}
+
+.tunable-chip:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.tunable-chip:disabled:hover {
+  border-color: var(--border-soft);
+  color: var(--text-dim);
+}
+
+.tunable-chip .chip-count {
+  opacity: 0.6;
+  margin-left: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* An explicit `display` in this stylesheet outranks the browser's own
+   `[hidden] { display: none }`, so the three things the filter hides have to say
+   so here — otherwise setting .hidden in JS does nothing at all. */
+.tunable[hidden],
+.tunable-group[hidden],
+.tunable-search-clear[hidden] {
+  display: none;
+}
+
+.tunable-no-matches {
+  margin: 0;
+  padding: 22px 4px;
+  text-align: center;
+  font-size: 12.5px;
+  color: var(--text-faint);
+}
+
 .tunable-group {
   display: flex;
   flex-direction: column;

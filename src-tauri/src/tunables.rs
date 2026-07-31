@@ -417,9 +417,12 @@ tunables! {
         "Start command", "",
         Kind::Text { default: "", placeholder: "C:\\sd\\sd-server.exe -m C:\\sd\\model.safetensors --listen-port 7801 --diffusion-fa --vae-tiling" },
         restart: false,
-        "Run at startup if nothing is already listening at the address above. \
-         The two flags in the example are not optional on an AMD card: measured on \
-         this machine, without --diffusion-fa a 768x768 image exceeded the Vulkan \
+        "How to start the picture server. Run when you first ask for a drawing and \
+         nothing is already listening at the address above — not at startup, \
+         because it is too large to keep resident alongside the chat model (see \
+         the idle setting below). \
+         The --diffusion-fa flag in the example is not optional on an AMD card: \
+         measured on this machine, without it a 768x768 image exceeded the Vulkan \
          driver's 2 GB single-allocation limit and fell back to roughly CPU speed \
          (300s and still unfinished, against 5.7s with it).";
 
@@ -439,6 +442,19 @@ tunables! {
         "How many passes the model refines the picture over. More is slower and \
          better only up to a point — around 20-30 for most models, and as few as 4 \
          for the 'turbo' and 'schnell' variants, which will look burnt at 24.";
+
+    IMAGE_IDLE_SHUTDOWN = "image.idle_shutdown_secs", "Images",
+        "Shut the server down after", "seconds idle",
+        Kind::Int { min: 0, max: 3600, default: 180 },
+        restart: false,
+        "The picture server is started by your first drawing and stopped again \
+         once you stop drawing. This is how long it waits. It is not stopped after \
+         every picture on purpose: loading a ten-gigabyte model takes about as \
+         long as five pictures, so asking for three in a row would pay that three \
+         times. 0 leaves it running, which is right only if the card has room for \
+         it and the chat model at once — measured here, a 10 GB image model plus a \
+         10 GB chat model on a 16 GB card does not fail, it silently pages to \
+         system memory and makes both slow.";
 
     IMAGE_SEED = "image.seed", "Images",
         "Seed", "",
@@ -539,14 +555,24 @@ tunables! {
 
     MAIL_BRIEF_DAYS = "mail.brief_days", "Mail",
         "Morning card looks back", "days",
-        Kind::Int { min: 1, max: 90, default: 7 },
+        Kind::Int { min: 1, max: 90, default: 1 },
         restart: false,
         "How far back the morning card counts as still waiting for you. Both the \
          listed messages and the unread total obey it, so the number and the rows \
-         describe the same week. Without a window the total is whatever Gmail's \
-         own all-time counter says — 18,600 in one mailbox here, almost all of it \
-         years old, which answers a question nobody asked. Raise it if you go \
-         through mail less often than weekly.";
+         describe the same stretch of time. Without a window the total is whatever \
+         Gmail's own all-time counter says — 18,600 in one mailbox here, almost \
+         all of it years old, which answers a question nobody asked. Raise it if \
+         you go through your mail less often than daily.";
+
+    MAIL_BRIEF_MAX_ITEMS = "mail.brief_max_items", "Mail",
+        "Most messages on the card", "",
+        Kind::Int { min: 1, max: 200, default: 60 },
+        restart: false,
+        "A ceiling, not a target: the card lists everything unread inside the \
+         window above, across every connected account, and this only stops a day \
+         that brought two hundred newsletters from turning into two hundred \
+         requests and a card that takes minutes to build. Lower it if you would \
+         rather the card stayed short than complete.";
 
     MAIL_BRIEF_HOUR = "mail.brief_hour", "Mail",
         "Morning summary after", "o'clock",

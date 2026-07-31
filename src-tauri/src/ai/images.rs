@@ -23,12 +23,24 @@
 // slow.
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use base64::Engine;
 use serde::Serialize;
 use tauri::Manager;
 
-use crate::ai::process::{autostart_if_needed, stop_local_server};
+use crate::ai::process::{is_reachable, spawn_detached, stop_local_server};
+
+/// How long to wait for the server to finish loading before giving up. Ten
+/// gigabytes of weights off an SSD took about forty-five seconds when measured
+/// here, so this is generous rather than tight — the alternative to waiting is
+/// telling the user it failed while it is still starting.
+const START_TIMEOUT_SECS: u64 = 180;
+
+/// How often the idle watcher asks whether drawing has stopped.
+const IDLE_CHECK_SECS: u64 = 15;
 
 /// A server that has to load several GB before it answers the first request,
 /// then denoise for as long as the resolution demands. Measured on this
@@ -133,17 +145,30 @@ pub async fn generate_image(
         let seed = if pinned < 0 { random_seed() } else { pinned };
 
         let started = std::time::Instant::now();
-        let (bytes, seed) = match sdcpp_generate(
-            base_url, &prompt, negative.trim(), width, height, steps, seed,
-        ) {
-            Some(result) => (result?, Some(seed)),
-            // Not a stable-diffusion.cpp server. The generic endpoint still
-            // draws, it just cannot be told a seed or a step count.
-            None => (
-                openai_generate(base_url, &prompt, negative.trim(), width, height)?,
-                None,
-            ),
-        };
+
+        // Counted around everything below, including the load, so the idle
+        // watcher cannot shut the server down while a picture is being drawn —
+        // or while the one before it is still loading the weights.
+        DRAWING.fetch_add(1, Ordering::SeqCst);
+        let outcome = (|| -> Result<(Vec<u8>, Option<i64>), String> {
+            ensure_running(&app, base_url)?;
+            match sdcpp_generate(base_url, &prompt, negative.trim(), width, height, steps, seed) {
+                Some(result) => Ok((result?, Some(seed))),
+                // Not a stable-diffusion.cpp server. The generic endpoint still
+                // draws, it just cannot be told a seed or a step count.
+                None => Ok((
+                    openai_generate(base_url, &prompt, negative.trim(), width, height)?,
+                    None,
+                )),
+            }
+        })();
+        // Refreshed on the way out whether or not it worked: a failed attempt
+        // still left a loaded server that should be given its idle period rather
+        // than shut down a second later.
+        *last_drawn().lock().unwrap() = Some(Instant::now());
+        DRAWING.fetch_sub(1, Ordering::SeqCst);
+
+        let (bytes, seed): (Vec<u8>, Option<i64>) = outcome?;
 
         let path = images_dir(&app).join(file_name(&prompt));
         std::fs::write(&path, &bytes)
@@ -399,13 +424,98 @@ pub fn open_generated_image(app: tauri::AppHandle, path: String) -> Result<(), S
         .map_err(|e| format!("Couldn't open it: {e}"))
 }
 
-/// Started at launch when the user has configured a command for it, exactly
-/// like the LLM and speech servers — a picture server that has to be started by
-/// hand is one that is never running when it is wanted.
-pub fn maybe_autostart(app: &tauri::AppHandle) {
+// --- on-demand lifecycle ------------------------------------------------------
+//
+// The picture server is the one local server that is NOT started at launch, and
+// the reason is arithmetic. A current image model holds about ten gigabytes of
+// VRAM; the chat model holds another ten. On a sixteen-gigabyte card the two do
+// not fit, and Windows does not refuse — it pages the excess to system memory and
+// both keep reporting themselves as resident on the GPU while everything crawls
+// across PCIe. Measured consequence: mail summaries began timing out the day a
+// bigger image model was installed, with nothing to connect the two.
+//
+// So it is started by the first drawing and stopped once drawing stops. Not
+// stopped after each picture: loading ten gigabytes takes about as long as five
+// pictures, and asking for three in a row would pay it three times.
+
+/// When the last picture finished, or None when this widget has not started the
+/// server during this run.
+///
+/// Doubles as the "ours to stop" flag. A server the user started by hand — from
+/// Settings, or in a terminal — leaves this None and is never shut down
+/// underneath them, which is the same distinction process::stop_local_server
+/// deliberately gave up for the tray's explicit stop-everything button.
+static LAST_DRAWN: OnceLock<Mutex<Option<Instant>>> = OnceLock::new();
+
+/// Drawings currently in progress. The idle timer must not fire between two
+/// pictures in a batch, and "reachable" says nothing about "busy".
+static DRAWING: AtomicUsize = AtomicUsize::new(0);
+
+fn last_drawn() -> &'static Mutex<Option<Instant>> {
+    LAST_DRAWN.get_or_init(|| Mutex::new(None))
+}
+
+/// Makes sure something is answering at `base_url`, starting it if not.
+///
+/// Waits for the load rather than returning as soon as the process exists: a
+/// server that has not finished reading its weights refuses connections, and the
+/// caller is about to send it a request.
+fn ensure_running(app: &tauri::AppHandle, base_url: &str) -> Result<(), String> {
+    if is_reachable(base_url) {
+        return Ok(());
+    }
     let command = crate::tunables::text(app, crate::tunables::IMAGE_START_COMMAND);
-    let base_url = crate::tunables::text(app, crate::tunables::IMAGE_BASE_URL);
-    autostart_if_needed(base_url.trim(), command.trim());
+    if command.trim().is_empty() {
+        return Err(format!(
+            "Nothing is answering at {base_url} and no start command is set — \
+             fill one in under Settings → Images."
+        ));
+    }
+    if spawn_detached(command.trim()).is_none() {
+        return Err("Couldn't launch the image server — check the start command.".to_string());
+    }
+    // Marked as ours before the wait, so a load that times out still leaves a
+    // process the idle timer will clean up rather than one that lingers forever.
+    *last_drawn().lock().unwrap() = Some(Instant::now());
+
+    let deadline = Instant::now() + Duration::from_secs(START_TIMEOUT_SECS);
+    while Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(700));
+        if is_reachable(base_url) {
+            return Ok(());
+        }
+    }
+    Err(format!(
+        "The image server did not come up within {START_TIMEOUT_SECS}s. A large \
+         model can take a while to load — try again, or start it from Settings → Images."
+    ))
+}
+
+/// Stops the picture server once nothing has been drawn for a while.
+///
+/// One long-lived thread rather than a timer armed per drawing: the condition is
+/// "quiet for long enough", and that is cheaper to ask periodically than to
+/// cancel and re-arm on every request.
+pub fn start_idle_watcher(app: tauri::AppHandle) {
+    std::thread::spawn(move || loop {
+        std::thread::sleep(Duration::from_secs(IDLE_CHECK_SECS));
+
+        let idle_secs = crate::tunables::int(&app, crate::tunables::IMAGE_IDLE_SHUTDOWN);
+        // Zero means "leave it running", for a machine with the memory to spare.
+        if idle_secs <= 0 || DRAWING.load(Ordering::SeqCst) > 0 {
+            continue;
+        }
+        let Some(last) = *last_drawn().lock().unwrap() else {
+            continue; // not ours — see LAST_DRAWN
+        };
+        if last.elapsed() < Duration::from_secs(idle_secs as u64) {
+            continue;
+        }
+
+        let base_url = crate::tunables::text(&app, crate::tunables::IMAGE_BASE_URL);
+        stop_local_server(base_url.trim());
+        *last_drawn().lock().unwrap() = None;
+    });
 }
 
 /// Stops the local picture server for the tray's stop-and-quit, whoever started

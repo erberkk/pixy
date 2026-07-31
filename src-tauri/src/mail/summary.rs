@@ -189,6 +189,20 @@ pub fn describe(app: &tauri::AppHandle, message: &MailMessage) -> String {
         model_is_local,
     );
     if decision == Plan::Preview {
+        // Why, in counts only. "The description is the message's own first lines"
+        // is indistinguishable from "the model wrote this", so without a line here
+        // there is no way to tell a working summarizer from one that never ran.
+        crate::mail::debug_log(
+            app,
+            &format!(
+                "mail-summary: preview ({} chars, threshold {}, model={}, local_only={}, model_is_local={})",
+                body.chars().count(),
+                tunables::int(app, tunables::MAIL_SUMMARIZE_MIN_CHARS).max(0),
+                has_model,
+                tunables::toggle(app, tunables::MAIL_LOCAL_MODELS_ONLY),
+                model_is_local,
+            ),
+        );
         return fallback;
     }
 
@@ -201,6 +215,7 @@ pub fn describe(app: &tauri::AppHandle, message: &MailMessage) -> String {
         timeout_secs: tunables::int(app, tunables::MAIL_SUMMARY_TIMEOUT).max(1) as u64,
     };
 
+    let timeout = endpoint.timeout_secs;
     match crate::ai::llm::summarize_mail(
         endpoint,
         &message.from_name,
@@ -212,7 +227,22 @@ pub fn describe(app: &tauri::AppHandle, message: &MailMessage) -> String {
         // Both remaining cases — the model answered with nothing usable, or the
         // call failed outright — land on exactly the same fallback. That is the
         // point: there is no path here that produces an empty description.
-        _ => fallback,
+        //
+        // They are logged apart, though, because they mean very different things
+        // to whoever is wondering why a summary did not appear. A timeout here is
+        // usually the model competing for VRAM with something else on the machine
+        // rather than anything about the mail.
+        Ok(None) => {
+            crate::mail::debug_log(app, "mail-summary: model returned nothing usable, using preview");
+            fallback
+        }
+        Err(error) => {
+            crate::mail::debug_log(
+                app,
+                &format!("mail-summary: model call failed after up to {timeout}s — {error}"),
+            );
+            fallback
+        }
     }
 }
 

@@ -626,10 +626,29 @@
             </p>
           </header>
 
+          <!-- Fifty-odd settings across eleven groups is too many to scan, so the
+               list is filtered rather than only scrolled. Sticky, because a filter
+               you have to scroll back up to reach is one you stop using. The chips
+               are built from the schema's own group list (settings.js), so a new
+               group in tunables.rs shows up here without being named twice. -->
+          <div class="tunable-filter">
+            <div class="tunable-search">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4.35-4.35"/></svg>
+              <input id="tunableSearch" type="search" placeholder="Search settings…" aria-label="Search settings" autocomplete="off" />
+              <button class="tunable-search-clear" id="tunableSearchClear" type="button" title="Clear (Esc)" hidden>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6L6 18"/></svg>
+              </button>
+            </div>
+            <div class="tunable-chips" id="tunableChips" role="group" aria-label="Filter by section"></div>
+          </div>
+
           <!-- Rendered from the schema the backend sends (src-tauri/src/tunables.rs),
                not written out by hand: a settings form kept in sync manually is a
                settings form that eventually disagrees with the code reading it. -->
           <div id="tunableGroups"></div>
+
+          <!-- Every row filtered out — otherwise the section just looks broken. -->
+          <p class="tunable-no-matches" id="tunableNoMatches" hidden></p>
 
           <div class="status" id="advancedStatus"></div>
 

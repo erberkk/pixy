@@ -248,8 +248,16 @@ pub fn run() {
                 ai::llm::maybe_autostart(&app_handle);
                 ai::speech::maybe_autostart_stt(&app_handle);
                 ai::speech::maybe_autostart_tts(&app_handle);
-                ai::images::maybe_autostart(&app_handle);
             });
+
+            // The picture server is deliberately NOT autostarted with the three
+            // above. It is the only one big enough to matter: it and the chat
+            // model together want more VRAM than the card has, and Windows
+            // answers that by paging to system memory rather than refusing, so
+            // both look resident while everything slows down. Started by the
+            // first drawing instead, and stopped once drawing stops — see
+            // ai/images.rs's on-demand lifecycle.
+            ai::images::start_idle_watcher(app.handle().clone());
 
             github::start_merge_watcher(app.handle().clone());
             github::start_daily_digest_watcher(app.handle().clone());

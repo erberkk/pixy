@@ -25,26 +25,6 @@ use crate::tunables;
 /// request bounded for an inbox with thousands unread.
 const UNREAD_LOOKUP_LIMIT: u32 = 25;
 
-fn debug_log_path(app: &tauri::AppHandle) -> PathBuf {
-    let dir = app.path().app_data_dir().expect("app data dir must be resolvable");
-    let _ = std::fs::create_dir_all(&dir);
-    dir.join("mail-watcher-debug.log")
-}
-
-/// Appends a line to the mail watcher's log.
-///
-/// Callers must pass counts and ids only — never a sender, subject or body. See
-/// this module's header for why.
-fn append_debug_log(app: &tauri::AppHandle, entry: &str) {
-    use std::io::Write;
-    if let Ok(mut file) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(debug_log_path(app))
-    {
-        let _ = writeln!(file, "{entry}");
-    }
-}
 
 #[derive(Serialize, Deserialize, Clone, Default)]
 struct SeenCache {
@@ -150,7 +130,7 @@ fn poll_account(
             // A dead grant has already emitted google-auth-needed from the token
             // layer; here it only needs to not be retried as if it were a blip.
             // One account failing must not stop the others being polled.
-            append_debug_log(app, &format!("mail-watcher [{tag}]: list failed — {}", error.message()));
+            crate::mail::debug_log(app, &format!("mail-watcher [{tag}]: list failed — {}", error.message()));
             return;
         }
     };
@@ -168,7 +148,7 @@ fn poll_account(
     caches.insert(account.id.clone(), next_cache);
 
     if !cache.initialized {
-        append_debug_log(
+        crate::mail::debug_log(
             app,
             &format!("mail-watcher [{tag}]: first run, baseline of {} unread recorded", unread.len()),
         );
@@ -179,7 +159,7 @@ fn poll_account(
     if arrived.is_empty() {
         return;
     }
-    append_debug_log(app, &format!("mail-watcher [{tag}]: {} new message(s)", arrived.len()));
+    crate::mail::debug_log(app, &format!("mail-watcher [{tag}]: {} new message(s)", arrived.len()));
 
     if !tunables::toggle(app, tunables::MAIL_NOTIFY_NEW) {
         return;
@@ -200,7 +180,7 @@ fn poll_account(
         let message = match gmail::fetch_message(app, &account.id, id) {
             Ok(message) => message,
             Err(error) => {
-                append_debug_log(
+                crate::mail::debug_log(
                     app,
                     &format!("mail-watcher [{tag}]: {id} fetch failed — {}", error.message()),
                 );
@@ -241,7 +221,7 @@ fn poll_account(
             }),
         );
     }
-    append_debug_log(
+    crate::mail::debug_log(
         app,
         &format!("mail-watcher [{tag}]: announced {announced}, muted {skipped_muted}, collapsed {remaining}"),
     );

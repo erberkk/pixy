@@ -827,6 +827,7 @@ function refreshTunableRow(setting, row, input) {
   const atDefault = isAtDefault(setting, readTunableInput(setting, input));
   row.classList.toggle("overridden", !atDefault);
   row.querySelector(".tunable-reset").disabled = atDefault;
+  updateChangedChipCount();
 }
 
 // The event port is the one setting with a consequence outside the widget: the
@@ -988,6 +989,7 @@ async function loadTunableSettings() {
     const ownSection = OWN_SECTION_GROUPS[group];
     const block = document.createElement("div");
     block.className = "tunable-group";
+    block.dataset.group = group;
     if (!ownSection) {
       const heading = document.createElement("h4");
       heading.textContent = group;
@@ -998,6 +1000,118 @@ async function loadTunableSettings() {
     }
     (ownSection ? el(ownSection) : advanced).appendChild(block);
   }
+
+  // The chips describe what the form actually holds, so they are rebuilt with it
+  // — and the filter is re-applied, since a rebuild starts every row visible
+  // again while the search box still says otherwise.
+  renderTunableChips(payload.groups.filter((group) => !OWN_SECTION_GROUPS[group]));
+  applyTunableFilter();
+}
+
+/* ---------- Advanced's filter ----------
+   Fifty-odd settings in eleven groups. Rows are hidden rather than removed, on
+   purpose: saveTunableSettings reads every input in the DOM by id, so a filtered
+   form still saves the whole form rather than only the part on screen. */
+
+let tunableGroupFilter = "all"; // a group name, "all", or "changed"
+
+function renderTunableChips(groups) {
+  const container = el("tunableChips");
+  container.innerHTML = "";
+
+  const chips = [["all", "All", tunableSchema.filter((s) => !OWN_SECTION_GROUPS[s.group]).length]];
+  for (const group of groups) {
+    chips.push([group, group, tunableSchema.filter((s) => s.group === group).length]);
+  }
+  // Last: the answer to "what have I actually changed?", which in a form of
+  // sixty defaults is otherwise a hunt for the small amber dot beside a label.
+  // Always present, so its count can double as a live readout of how far the
+  // form has drifted from its defaults — disabled while that count is zero.
+  chips.push(["changed", "Changed", el("tunableGroups").querySelectorAll(".tunable.overridden").length]);
+
+  for (const [value, label, count] of chips) {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "tunable-chip" + (value === "changed" ? " changed" : "");
+    chip.dataset.value = value;
+    chip.innerHTML = `${escapeHtml(label)}<span class="chip-count">${count}</span>`;
+    chip.addEventListener("click", () => {
+      tunableGroupFilter = value;
+      applyTunableFilter();
+    });
+    container.appendChild(chip);
+  }
+  updateChangedChipCount();
+  syncTunableChipState();
+}
+
+// Re-read live as values are edited, so the count never claims fewer changes
+// than the form is showing. Deliberately does NOT re-run the filter: a row must
+// not vanish from under the cursor the moment it is typed back to its default.
+function updateChangedChipCount() {
+  const chip = el("tunableChips").querySelector(".tunable-chip.changed");
+  if (!chip) return;
+  const changed = el("tunableGroups").querySelectorAll(".tunable.overridden").length;
+  chip.querySelector(".chip-count").textContent = changed;
+  // Nothing to filter to. Left in place rather than removed so the row of chips
+  // doesn't reflow every time the last override is undone.
+  chip.disabled = changed === 0 && tunableGroupFilter !== "changed";
+}
+
+function syncTunableChipState() {
+  for (const chip of el("tunableChips").querySelectorAll(".tunable-chip")) {
+    const on = chip.dataset.value === tunableGroupFilter;
+    chip.classList.toggle("active", on);
+    chip.setAttribute("aria-pressed", String(on));
+  }
+}
+
+// Matched against the label, the help text and the setting's own id — the id is
+// what you have when you arrived here from a comment in the code or from SETUP.md
+// ("mic.speech_over_floor"), and it is not written anywhere else on screen.
+function tunableMatchesSearch(row, needle) {
+  if (!needle) return true;
+  const haystack = [
+    row.dataset.id,
+    row.querySelector(".tunable-label")?.textContent,
+    row.querySelector(".tunable-help")?.textContent,
+  ]
+    .join(" ")
+    .toLowerCase();
+  return haystack.includes(needle);
+}
+
+function applyTunableFilter() {
+  const search = el("tunableSearch");
+  const needle = search.value.trim().toLowerCase();
+  el("tunableSearchClear").hidden = needle === "";
+
+  let shown = 0;
+  for (const block of el("tunableGroups").querySelectorAll(".tunable-group")) {
+    let visibleInGroup = 0;
+    for (const row of block.querySelectorAll(".tunable")) {
+      const passesGroup =
+        tunableGroupFilter === "all" ||
+        (tunableGroupFilter === "changed" ? row.classList.contains("overridden") : block.dataset.group === tunableGroupFilter);
+      const visible = passesGroup && tunableMatchesSearch(row, needle);
+      row.hidden = !visible;
+      if (visible) visibleInGroup++;
+    }
+    // A group heading with nothing under it is just a word on the page.
+    block.hidden = visibleInGroup === 0;
+    shown += visibleInGroup;
+  }
+
+  const empty = el("tunableNoMatches");
+  empty.hidden = shown > 0;
+  if (shown === 0) {
+    empty.textContent = needle
+      ? `Nothing matches “${search.value.trim()}”.`
+      : tunableGroupFilter === "changed"
+        ? "Every setting is on its default."
+        : "Nothing to show here.";
+  }
+  syncTunableChipState();
 }
 
 // What the index holds, and whether meaning search is actually working. Without
@@ -1229,6 +1343,22 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   el("advancedSaveBtn").addEventListener("click", () => saveTunableSettings(el("advancedStatus")));
   el("advancedResetBtn").addEventListener("click", resetAllTunables);
+
+  el("tunableSearch").addEventListener("input", applyTunableFilter);
+  el("tunableSearch").addEventListener("keydown", (e) => {
+    if (e.key !== "Escape" || el("tunableSearch").value === "") return;
+    // Clears the box rather than closing the window, which is what Escape does
+    // everywhere else in here — but only while there is something to clear, so
+    // Escape still shuts the window from an empty search box.
+    e.stopPropagation();
+    el("tunableSearch").value = "";
+    applyTunableFilter();
+  });
+  el("tunableSearchClear").addEventListener("click", () => {
+    el("tunableSearch").value = "";
+    applyTunableFilter();
+    el("tunableSearch").focus();
+  });
   el("memorySaveBtn").addEventListener("click", () => saveTunableSettings(el("memorySettingsStatus")));
   el("imageSaveBtn").addEventListener("click", () => saveTunableSettings(el("imageSettingsStatus")));
   // Saves first, so pressing Start now after editing the command starts the one
