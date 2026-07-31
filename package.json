@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "tauri": "tauri",
-    "test": "node --test \"src/**/*.test.js\""
+    "test": "node --test \"src/**/*.test.js\"",
+    "shots": "node tools/screenshots/shots.mjs src docs/shots tools/screenshots/run.mjs"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2"

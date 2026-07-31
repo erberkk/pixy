@@ -1,0 +1,148 @@
+// The invented data every window is shown. Kept as real JS objects and handed
+// to the page through JSON.stringify — never pasted into a template literal,
+// because a fenced code block inside a chat message ends one and the syntax
+// error lands 40 lines away from the cause.
+export const RESPONSES = {
+  // --- mascot ---
+  pending_permissions: { count: 0, oldest_secs: 0 },
+  get_power_status: { on_battery: false, percent: 88 },
+  get_idle_seconds: 3,
+  is_mic_capture_active: false,
+  system_mic_get_muted: false,
+  list_audio_sessions: [],
+  get_voice_readiness: { enabled: false, ready: false },
+  spotify_get_state: {
+    playing: true,
+    title: "Sunset Rollercoaster",
+    artist: "My Jinji",
+    album_art: null,
+  },
+  set_hot_rect: null,
+  set_click_through_paused: null,
+
+  // --- workspace ---
+  get_notes_dir: "C:\\Users\\you\\Documents\\Notes",
+  get_chat_instructions: "",
+  recall_context: null,
+  search_chats: [],
+  get_model_capabilities: { vision: true, tools: true },
+  get_llm_settings: {
+    profiles: [
+      { id: "local", name: "Qwen 14B (local)", base_url: "http://localhost:8080/v1", model: "qwen2.5-14b", api_key: "" },
+      { id: "small", name: "Qwen 3B (fast)", base_url: "http://localhost:8080/v1", model: "qwen2.5-3b", api_key: "" },
+    ],
+    active_profile_id: "local",
+    autostart: true,
+    start_command: "",
+  },
+  list_chats: [
+    { id: "c1", title: "Pinning DNS between the check and the connect", updated_at: 1753960000000, message_count: 4 },
+    { id: "c2", title: "Why the window never resizes at runtime", updated_at: 1753870000000, message_count: 6 },
+    { id: "c3", title: "Turkish dotless i in the search index", updated_at: 1753780000000, message_count: 9 },
+  ],
+  load_chat: {
+    id: "c1",
+    title: "Pinning DNS between the check and the connect",
+    profile_id: "local",
+    created_at: 1753950000000,
+    updated_at: 1753960000000,
+    messages: [
+      {
+        role: "user",
+        content:
+          "If I check that a URL resolves to a public address and *then* connect, what stops DNS from answering differently the second time?",
+        ts: 1753950000000,
+        attachments: [],
+        source: "",
+      },
+      {
+        role: "assistant",
+        content: [
+          "Nothing, and that is exactly the hole. Validate-then-connect is two separate",
+          "lookups, so a name can resolve to a public address for the check and to a",
+          "loopback address for the request that follows.",
+          "",
+          "The fix is to stop doing the second lookup — resolve once, keep the addresses,",
+          "and hand them to the client:",
+          "",
+          "```rust",
+          "let addrs = resolve_and_check(host)?;",
+          "Client::builder().resolve_to_addrs(host, &addrs)",
+          "```",
+          "",
+          "TLS still verifies the hostname through SNI, so pinning the address does not",
+          "weaken the certificate check.",
+        ].join("\n"),
+        ts: 1753950060000,
+        attachments: [],
+        source: "",
+      },
+    ],
+  },
+  list_notes: [
+    {
+      file_path: "C:/Notes/release-checklist.md",
+      title: "release-checklist",
+      pinned: true,
+      trashed: false,
+      created_at: 1753700000000,
+      updated_at: 1753960000000,
+      content: [
+        "# Release checklist",
+        "",
+        "- [x] Icons regenerated from the 1024 source",
+        "- [x] Secret scan over the whole history",
+        "- [ ] Screenshot the workspace",
+        "- [ ] Tag v0.1.0",
+        "",
+        "The binary carries no secret of its own — see [[security-posture]]",
+        "before making the repository public.",
+      ].join("\n"),
+    },
+    {
+      file_path: "C:/Notes/security-posture.md",
+      title: "security-posture",
+      pinned: false, trashed: false,
+      created_at: 1753600000000, updated_at: 1753880000000,
+      content: "Tokens live in plaintext, deliberately. A desktop binary cannot keep a secret.",
+    },
+    {
+      file_path: "C:/Notes/wake-word-notes.md",
+      title: "wake-word-notes",
+      pinned: false, trashed: false,
+      created_at: 1753500000000, updated_at: 1753790000000,
+      content: "Threshold tuning: 0.62 was too eager on the word 'pixel'.",
+    },
+  ],
+  get_memory_roots: { default_root: "C:/Users/you/.claude/projects", extra_roots: [] },
+  list_memories: [
+    {
+      name: "local-first-rule",
+      description: "Nothing leaves the machine unless the user turns it on",
+      type: "project", project: "pixy", file_path: "a.md", updated_at: 1753960000000,
+      body: "Recall results are never sent to a hosted model unless recall.share_with_cloud is on.\n\nRelated: [[secret-storage]], [[hostile-web-input]]",
+      links: ["secret-storage", "hostile-web-input"],
+    },
+    {
+      name: "secret-storage",
+      description: "Tokens are plaintext, deliberately",
+      type: "project", project: "pixy", file_path: "b.md", updated_at: 1753940000000,
+      body: "A desktop binary cannot keep a secret, so the app ships without one.\n\nSee [[local-first-rule]].",
+      links: ["local-first-rule"],
+    },
+    {
+      name: "hostile-web-input",
+      description: "Anything fetched from the web is untrusted",
+      type: "project", project: "pixy", file_path: "c.md", updated_at: 1753930000000,
+      body: "Addresses are checked and then pinned, so DNS cannot change its mind.\n\nSee [[local-first-rule]].",
+      links: ["local-first-rule"],
+    },
+    {
+      name: "no-bundler",
+      description: "The frontend is compiled into the binary",
+      type: "reference", project: "pixy", file_path: "d.md", updated_at: 1753900000000,
+      body: "Editing a .js file needs a rebuild before it takes effect.",
+      links: [],
+    },
+  ],
+};

@@ -1,5 +1,23 @@
 # Contributing
 
+Contributions are welcome — this is a small project built by one person on one
+machine, which means the rough edges are real and finding them is genuinely
+useful.
+
+- **Found something broken?** Open an issue. See [Filing an issue](#filing-an-issue)
+  below for what to include — and what never to paste.
+- **Want to add something?** Open an issue first if it's substantial, so nobody
+  writes the same thing twice. Small fixes can go straight to a pull request.
+- **Ported it to macOS or Linux?** That is the single most useful thing anyone
+  could send. The platform-specific code sits in four files; the rest is already
+  neutral.
+- **Not a programmer?** Telling us what was confusing in [SETUP.md](SETUP.md) is
+  worth as much as a patch. Every instruction in it was written by someone who
+  already knew the answer.
+
+No CLA, no style bikeshedding, no minimum size. The one hard rule is the privacy
+one further down: never paste `config.json` anywhere.
+
 ## Build and run
 
 ```sh
