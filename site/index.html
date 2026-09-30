@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Pixy — a small robot for your desktop</title>
+<meta name="description" content="Pixy answers Claude Code's permission prompts from on top of every window, chats with a model on your own machine, and goes quiet until it has something to say. Local by default. Windows, open source." />
+<meta name="theme-color" content="#0a0b10" />
+<link rel="icon" type="image/png" href="/assets/icon.png" />
+<meta property="og:type" content="website" />
+<meta property="og:url" content="https://pixy-omega.vercel.app/" />
+<meta property="og:title" content="Pixy — a small robot for your desktop" />
+<meta property="og:description" content="Answers Claude Code from on top of every window. Chats with a local model. Nothing leaves your disk." />
+<meta property="og:image" content="https://pixy-omega.vercel.app/assets/claude-permission-bash.webp" />
+<meta name="twitter:card" content="summary_large_image" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Silkscreen&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+<a class="skip" href="#features">Skip to features</a>
+
+<header class="nav">
+  <div class="wrap nav-inner">
+    <a class="brand" href="#top" aria-label="Pixy home">
+      <svg class="bot bot-mini" data-bot viewBox="0 0 14 8" aria-hidden="true"></svg>
+      <span class="wordmark">Pixy</span>
+    </a>
+    <nav class="links" aria-label="Sections">
+      <a href="#features">Features</a>
+      <a href="#local">Privacy</a>
+      <a href="#start">Get started</a>
+      <a href="https://github.com/erberkk/pixy" target="_blank" rel="noopener">GitHub</a>
+    </nav>
+    <a class="btn btn-sm" href="#start">Download</a>
+  </div>
+</header>
+
+<main id="top">
+  <!-- ============ HERO ============ -->
+  <section class="hero wrap">
+    <div class="hero-copy reveal">
+      <p class="eyebrow">Desktop companion · Windows · Open source</p>
+      <h1>A small robot that sits on your desktop.</h1>
+      <p class="lede">
+        Pixy answers Claude Code's permission prompts from on top of every window, chats with a model
+        running on your own machine, and goes quiet until it has something to say.
+        <strong>Nothing leaves the disk it was written to.</strong>
+      </p>
+      <div class="cta">
+        <a class="btn btn-primary" href="https://github.com/erberkk/pixy/releases/download/v0.1.0/Pixy_0.1.0_x64-setup.exe">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1 2.3 6.7 1.5v5.4H1zm0 11.4 5.7.8V9.1H1zm6.4.9L15 15.7V9.1H7.4zm0-13.2v5.5H15V.3z" fill="currentColor"/></svg>
+          Download for Windows
+        </a>
+        <a class="btn" href="https://github.com/erberkk/pixy" target="_blank" rel="noopener">View on GitHub</a>
+      </div>
+      <p class="meta">v0.1.0 preview · Windows 10 &amp; 11 · MIT licensed</p>
+    </div>
+
+    <div class="hero-stage reveal" aria-label="Pixy's moods">
+      <div class="stage-glow" aria-hidden="true"></div>
+      <svg class="bot bot-hero" data-bot data-follow viewBox="0 0 14 8" role="img" aria-label="Pixy, a pixel-art robot"></svg>
+      <div class="pill" aria-live="polite">
+        <span class="pill-label" data-pill-label>Idle</span>
+        <span class="pill-tail" data-pill-tail></span>
+      </div>
+      <div class="moods" role="radiogroup" aria-label="Try a mood">
+        <button role="radio" aria-checked="true" data-mood="idle">Idle</button>
+        <button role="radio" aria-checked="false" data-mood="coding">Coding</button>
+        <button role="radio" aria-checked="false" data-mood="thinking">Thinking</button>
+        <button role="radio" aria-checked="false" data-mood="listening">Listening</button>
+        <button role="radio" aria-checked="false" data-mood="alert">Needs you</button>
+      </div>
+      <img class="float-card" src="/assets/claude-permission-bash.webp" width="900" height="557"
+           alt="A Claude Code permission card: run cargo test, with Approve and Deny" />
+    </div>
+  </section>
+
+  <!-- ============ FEATURES ============ -->
+  <section id="features" class="feature wrap">
+    <div class="feature-copy reveal">
+      <p class="tag">01 · Claude Code</p>
+      <h2>Answers Claude Code for you.</h2>
+      <p>
+        Claude Code asks before it runs a command or edits a file. Normally that prompt waits in whichever
+        terminal you started it in. Pixy floats it on top of everything, so you can approve from wherever you
+        are, and the answer goes straight back to Claude.
+      </p>
+      <ul class="ticks">
+        <li>The real command, file path and diff are on the card</li>
+        <li>Several sessions waiting at once simply stack</li>
+        <li>Multiple-choice questions become tappable chips</li>
+      </ul>
+    </div>
+    <div class="shots two reveal">
+      <figure><img src="/assets/claude-permission-edit.webp" width="900" height="968" loading="lazy" alt="An edit card showing the diff Claude is about to make" /><figcaption>An edit, with its diff</figcaption></figure>
+      <figure><img src="/assets/claude-question.webp" width="900" height="1298" loading="lazy" alt="A multiple-choice question rendered as chips" /><figcaption>A question, as chips</figcaption></figure>
+    </div>
+  </section>
+
+  <section class="feature wrap flip">
+    <div class="feature-copy reveal">
+      <p class="tag">02 · Local model</p>
+      <h2>Chats with a model on your own machine.</h2>
+      <p>
+        Point it at whatever you run locally. Streaming replies, syntax highlighting, several named models you
+        can switch between mid-thought. Attach documents or images; edit a message and send it again, or retry a
+        single reply.
+      </p>
+      <p class="formats"><span>pdf</span><span>docx</span><span>pptx</span><span>xlsx</span><span>csv</span><span>md</span><span>txt</span><span>json</span><span>html</span></p>
+    </div>
+    <figure class="window reveal">
+      <div class="window-bar"><i></i><i></i><i></i><span>Workspace</span></div>
+      <img src="/assets/workspace-chat.webp" width="1800" height="1048" loading="lazy" alt="The chat window, with a syntax-highlighted Rust reply from a local qwen model" />
+    </figure>
+  </section>
+
+  <section class="feature wrap">
+    <div class="feature-copy reveal">
+      <p class="tag">03 · Memory</p>
+      <h2>Remembers what you already discussed.</h2>
+      <p>
+        Ask “what did we decide about caching?” and it finds the conversation that said <em>cache</em>,
+        searched across everything you have ever talked about and quietly added to your new question. Add an
+        embedding server and it also finds the one that made the same point in different words.
+      </p>
+    </div>
+    <figure class="window reveal">
+      <div class="window-bar"><i></i><i></i><i></i><span>Memory</span></div>
+      <img src="/assets/workspace-memory.webp" width="1800" height="1048" loading="lazy" alt="A graph of what Claude Code chose to remember about your projects" />
+    </figure>
+  </section>
+
+  <section class="feature wrap stacked">
+    <div class="feature-copy reveal">
+      <p class="tag">04 · Notices</p>
+      <h2>Tells you what happened while you were working.</h2>
+      <p>
+        Unread mail with a one-line summary written by your local model. A morning brief. A nudge before a
+        meeting. Merged pull requests, failing CI, and issues that just landed on you. All as notices that
+        appear and go away, not another tab to check.
+      </p>
+    </div>
+    <div class="collage reveal">
+      <img class="c-mail" src="/assets/mail-new.webp" width="1100" height="193" loading="lazy" alt="A new mail notice with a locally written summary" />
+      <img class="c-issue" src="/assets/github-issue.webp" width="1000" height="227" loading="lazy" alt="An issue assigned to you" />
+      <img class="c-cal" src="/assets/calendar-soon.webp" width="700" height="240" loading="lazy" alt="A meeting starting soon" />
+      <img class="c-brief" src="/assets/morning-brief.webp" width="900" height="878" loading="lazy" alt="The morning brief" />
+      <img class="c-digest" src="/assets/github-digest.webp" width="1000" height="532" loading="lazy" alt="The daily GitHub digest" />
+    </div>
+  </section>
+
+  <section class="wrap extras">
+    <p class="tag reveal">05 · And a few more things</p>
+    <div class="cards">
+      <article class="card reveal">
+        <div class="wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+        <h3>Listens when you say “hey pixy”</h3>
+        <p>An on-device wake word, then transcription and speech through local servers. Nothing is recorded or sent before it fires.</p>
+      </article>
+      <article class="card reveal">
+        <img src="/assets/workspace-notes.webp" width="1800" height="1048" loading="lazy" alt="The notes tab" />
+        <h3>Keeps notes</h3>
+        <p>Markdown with wiki-links, pinning and a focus mode. Real files in a real folder, editable by anything.</p>
+      </article>
+      <article class="card reveal">
+        <img src="/assets/spotify.webp" width="1000" height="455" loading="lazy" alt="The music panel" />
+        <h3>Plays music, draws pictures</h3>
+        <p>Music controls and per-app volume. Text-to-image through a local server, started when you ask and stopped when you're done.</p>
+      </article>
+    </div>
+  </section>
+
+  <!-- ============ USING IT ============ -->
+  <section class="wrap using">
+    <div class="reveal">
+      <p class="tag">Using it</p>
+      <h2>A pill that stays out of the way.</h2>
+      <p>Clicks pass straight through to whatever is underneath unless the cursor is actually on Pixy, so it can sit on top of your editor without getting in the way.</p>
+      <dl class="gestures">
+        <div><dt>Drag</dt><dd>Move it anywhere</dd></div>
+        <div><dt>Click</dt><dd>Music panel</dd></div>
+        <div><dt>Double-click</dt><dd>Open a terminal</dd></div>
+        <div><dt>Right-click</dt><dd>Workspace, Settings, Hide</dd></div>
+      </dl>
+    </div>
+    <div class="pills reveal" aria-label="Pixy's states">
+      <img src="/assets/pill-coding.webp" width="560" height="146" loading="lazy" alt="Coding" />
+      <img src="/assets/pill-thinking.webp" width="560" height="146" loading="lazy" alt="Thinking" />
+      <img src="/assets/pill-listening.webp" width="560" height="146" loading="lazy" alt="Listening" />
+      <img src="/assets/pill-happy.webp" width="560" height="146" loading="lazy" alt="Done" />
+      <img src="/assets/pill-alert.webp" width="560" height="146" loading="lazy" alt="Needs you" />
+    </div>
+  </section>
+
+  <!-- ============ LOCAL ============ -->
+  <section id="local" class="wrap local">
+    <div class="reveal">
+      <p class="tag">Local by default</p>
+      <h2>A straight answer, not a reassurance.</h2>
+    </div>
+    <ul class="local-list">
+      <li class="reveal"><b>Your history stays home.</b> Chat history, notes, memory and the search index never leave the machine. Remembered history isn't sent to a hosted model unless you turn that on.</li>
+      <li class="reveal"><b>Your own keys.</b> You supply your own OAuth client and tokens. There is no shared application and no secret compiled into the binary.</li>
+      <li class="reveal"><b>Honest about storage.</b> Secrets are stored in plaintext on your machine: a deliberate trade-off for a local-first tool, explained rather than hidden.</li>
+      <li class="reveal"><b>The web is hostile input.</b> Pages a model chose to read are treated as untrusted. The full threat model is in <a href="https://github.com/erberkk/pixy/blob/main/SECURITY.md" target="_blank" rel="noopener">SECURITY.md</a>.</li>
+    </ul>
+  </section>
+
+  <!-- ============ START ============ -->
+  <section id="start" class="wrap start">
+    <div class="reveal">
+      <p class="tag">Get started</p>
+      <h2>Three steps, none of them in a particular order.</h2>
+    </div>
+    <ol class="steps">
+      <li class="reveal">
+        <span class="n">1</span>
+        <h3>Install it</h3>
+        <p>Run the installer. Windows will warn that it's unsigned: choose <em>More info → Run anyway</em>.</p>
+        <div class="downloads">
+          <a class="btn btn-primary" href="https://github.com/erberkk/pixy/releases/download/v0.1.0/Pixy_0.1.0_x64-setup.exe">Installer (.exe)</a>
+          <a class="btn" href="https://github.com/erberkk/pixy/releases/download/v0.1.0/Pixy_0.1.0_x64_en-US.msi">.msi</a>
+          <a class="btn" href="https://github.com/erberkk/pixy/releases/download/v0.1.0/pixy.exe">Portable</a>
+        </div>
+      </li>
+      <li class="reveal">
+        <span class="n">2</span>
+        <h3>Open Settings</h3>
+        <p>From the tray icon, fill in whatever you want to use. Pixy starts fine with none of it; every feature stays quiet until it's configured.</p>
+      </li>
+      <li class="reveal">
+        <span class="n">3</span>
+        <h3>Hook up Claude Code</h3>
+        <p>Paste a few lines of hook configuration into <code>.claude/settings.json</code>. <a href="https://github.com/erberkk/pixy/blob/main/SETUP.md" target="_blank" rel="noopener">SETUP.md</a> walks through it, one feature at a time.</p>
+      </li>
+    </ol>
+  </section>
+</main>
+
+<footer class="footer wrap">
+  <svg class="bot bot-mini" data-bot viewBox="0 0 14 8" aria-hidden="true"></svg>
+  <p>Pixy is MIT licensed and built with <a href="https://tauri.app" target="_blank" rel="noopener">Tauri</a> by <a href="https://erberkakbulut.com" target="_blank" rel="noopener">Erberk Akbulut</a>.</p>
+  <a href="https://github.com/erberkk/pixy/releases" target="_blank" rel="noopener">All releases</a>
+</footer>
+
+<script src="/script.js" defer></script>
+</body>
+</html>
